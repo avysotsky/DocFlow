@@ -1,7 +1,7 @@
 [project]
 name = "docflow-extraction-worker"
-version = "0.1.0"
-description = "Document text/OCR/LLM extraction worker for DocFlow"
+version = "0.2.0"
+description = "Document text/OCR/AI extraction worker for DocFlow"
 requires-python = ">=3.11"
 dependencies = [
   "pymupdf",
@@ -11,3 +11,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["docflow_worker*"]
