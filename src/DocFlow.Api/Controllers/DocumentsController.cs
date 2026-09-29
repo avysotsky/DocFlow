@@ -27,12 +27,13 @@ public sealed class DocumentsController : ControllerBase
     [ProducesResponseType(typeof(UploadDocumentResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UploadDocumentResponse>> Upload(
-        [FromForm] Guid customerId,
-        [FromForm] IFormFile? file,
+        [FromForm] UploadDocumentRequest request,
         CancellationToken cancellationToken)
     {
-        if (customerId == Guid.Empty)
+        if (request.CustomerId == Guid.Empty)
             return BadRequest("Customer id is required.");
+
+        var file = request.File;
 
         if (file is null || file.Length == 0)
             return BadRequest("A non-empty PDF file is required.");
@@ -60,7 +61,7 @@ public sealed class DocumentsController : ControllerBase
         }
 
         var document = new Document(
-            customerId,
+            request.CustomerId,
             file.FileName,
             file.ContentType,
             storageKey,
@@ -109,6 +110,12 @@ public sealed class DocumentsController : ControllerBase
             && signature[2] == (byte)'D'
             && signature[3] == (byte)'F'
             && signature[4] == (byte)'-';
+    }
+
+    public sealed class UploadDocumentRequest
+    {
+        public Guid CustomerId { get; init; }
+        public IFormFile? File { get; init; }
     }
 
     public sealed record UploadDocumentResponse(
