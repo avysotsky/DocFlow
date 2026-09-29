@@ -19,6 +19,9 @@ venv/
 !.env.example
 appsettings.Development.local.json
 
+## Local document storage
+src/DocFlow.Api/storage/
+
 ## OS / IDE
 .DS_Store
 Thumbs.db

@@ -1,4 +1,6 @@
+using DocFlow.Application.Abstractions;
 using DocFlow.Infrastructure.Persistence;
+using DocFlow.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +14,12 @@ var connectionString = builder.Configuration.GetConnectionString("DocFlowDbConte
 
 builder.Services.AddDbContext<DocFlowDbContext>(options =>
     options.UseNpgsql(connectionString));
+
+var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
+if (!Path.IsPathRooted(storageRoot))
+    storageRoot = Path.Combine(builder.Environment.ContentRootPath, storageRoot);
+
+builder.Services.AddSingleton<IFileStorage>(new LocalFileStorage(storageRoot));
 
 var app = builder.Build();
 
