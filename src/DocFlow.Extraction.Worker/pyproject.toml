@@ -1,0 +1,13 @@
+[project]
+name = "docflow-extraction-worker"
+version = "0.1.0"
+description = "Document text/OCR/LLM extraction worker for DocFlow"
+requires-python = ">=3.11"
+dependencies = [
+  "pymupdf",
+  "pdfplumber",
+  "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
