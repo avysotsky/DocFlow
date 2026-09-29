@@ -2,6 +2,7 @@ using DocFlow.Application.Abstractions;
 using DocFlow.Domain.Entities;
 using DocFlow.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace DocFlow.Api.Controllers;
 
@@ -20,6 +21,36 @@ public sealed class DocumentsController : ControllerBase
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
+    }
+
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(GetDocumentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<GetDocumentResponse>> GetById(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var document = await _dbContext.Documents
+            .AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => new GetDocumentResponse(
+                x.Id,
+                x.CustomerId,
+                x.OriginalFileName,
+                x.ContentType,
+                x.StorageKey,
+                x.Size,
+                x.DocumentType,
+                x.Status.ToString(),
+                x.CreatedAt,
+                x.ProcessedAt,
+                x.DeleteAt))
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (document is null)
+            return NotFound();
+
+        return Ok(document);
     }
 
     [HttpPost]
@@ -123,4 +154,17 @@ public sealed class DocumentsController : ControllerBase
         string Status,
         string OriginalFileName,
         DateTimeOffset CreatedAt);
+
+    public sealed record GetDocumentResponse(
+        Guid Id,
+        Guid CustomerId,
+        string OriginalFileName,
+        string ContentType,
+        string StorageKey,
+        long Size,
+        string? DocumentType,
+        string Status,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? ProcessedAt,
+        DateTimeOffset? DeleteAt);
 }
