@@ -1,0 +1,44 @@
+name: Python Worker CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/DocFlow.Extraction.Worker/**'
+      - '.github/workflows/python-worker-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/DocFlow.Extraction.Worker/**'
+      - '.github/workflows/python-worker-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: src/DocFlow.Extraction.Worker
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Compile
+        run: python -m compileall -q docflow_worker main.py
+
+      - name: Test
+        run: pytest -q
