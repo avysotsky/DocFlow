@@ -56,7 +56,7 @@ public sealed class PythonDocumentExtractionRunner : IDocumentExtractionRunner
         startInfo.ArgumentList.Add("--storage-key");
         startInfo.ArgumentList.Add(storageKey);
         startInfo.ArgumentList.Add("--document-type");
-        startInfo.ArgumentList.Add("supplier_quotation");
+        startInfo.ArgumentList.Add("auto");
         startInfo.ArgumentList.Add("--output-structured-json");
         startInfo.ArgumentList.Add(outputFileName);
 
