@@ -196,3 +196,62 @@ def test_extracts_supplier_quotation_from_borderless_layout_text() -> None:
     assert data["items"][0]["line_total"] == Decimal("250.00")
     assert data["items"][1]["sku"] == "BX-240"
     assert data["items"][1]["line_total"] == Decimal("310.00")
+
+
+def test_recognizes_alternate_supplier_item_headers() -> None:
+    content = DocumentContent(
+        pages=[
+            PageContent(
+                page_number=1,
+                width=595,
+                height=842,
+                text="Quote Number Q-77 Quote Date 30.09.2026",
+                words=[],
+                blocks=_blocks(),
+                tables=[
+                    TableContent(
+                        bbox=_bbox(100, 180),
+                        rows=[
+                            ["Quote Number", "Q-77", "Currency", "EUR"],
+                            ["Quote Date", "30.09.2026", "Valid Through", "15.10.2026"],
+                        ],
+                    ),
+                    TableContent(
+                        bbox=_bbox(200, 380),
+                        rows=[
+                            [
+                                "Part No.",
+                                "Item Description",
+                                "Quantity",
+                                "UOM",
+                                "Price (EUR)",
+                                "Amount (EUR)",
+                            ],
+                            [
+                                "ALT-1",
+                                "Alternate supplier item",
+                                "2",
+                                "pcs",
+                                "1,234.50",
+                                "2,469.00",
+                            ],
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    result = asyncio.run(DeterministicSupplierQuotationEngine().extract(content))
+    data = result.data
+
+    assert data["quotation_number"] == "Q-77"
+    assert data["quotation_date"] == date(2026, 9, 30)
+    assert data["valid_until"] == date(2026, 10, 15)
+    assert len(data["items"]) == 1
+    assert data["items"][0]["sku"] == "ALT-1"
+    assert data["items"][0]["description"] == "Alternate supplier item"
+    assert data["items"][0]["quantity"] == Decimal("2")
+    assert data["items"][0]["unit"] == "pcs"
+    assert data["items"][0]["unit_price"] == Decimal("1234.50")
+    assert data["items"][0]["line_total"] == Decimal("2469.00")
