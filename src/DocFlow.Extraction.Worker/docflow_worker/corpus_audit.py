@@ -79,9 +79,7 @@ def audit_corpus(
     manifest: BenchmarkManifest = load_manifest(manifest_path)
     manifest_directory = manifest_path.parent
     inventory_by_path = _resolved_inventory_entries(inventory)
-    canonical_entries = [
-        entry for entry in inventory.documents if entry.duplicate_of is None
-    ]
+    inventory_hashes = {entry.sha256 for entry in inventory.documents}
     issues: list[CorpusAuditIssue] = []
 
     for entry in inventory.documents:
@@ -98,7 +96,7 @@ def audit_corpus(
                 issues,
                 "warning",
                 "duplicate_content_present",
-                f"PDF content duplicates canonical inventory id '{entry.duplicate_of}'.",
+                f"PDF content duplicates inventory id '{entry.duplicate_of}'.",
                 file=entry.file,
             )
 
@@ -117,7 +115,7 @@ def audit_corpus(
                 file=str(path),
             )
 
-    represented_canonical_ids: set[str] = set()
+    represented_hashes: list[str] = []
 
     for case, resolved_path in zip(manifest.documents, manifest_paths, strict=True):
         entry = inventory_by_path.get(resolved_path)
@@ -132,20 +130,7 @@ def audit_corpus(
             )
             continue
 
-        if entry.duplicate_of is not None:
-            _issue(
-                issues,
-                "error",
-                "manifest_uses_duplicate_content",
-                (
-                    "Manifest includes duplicate PDF content instead of the canonical "
-                    f"inventory entry '{entry.duplicate_of}'."
-                ),
-                document_id=case.id,
-                file=case.file,
-            )
-        else:
-            represented_canonical_ids.add(entry.suggested_id)
+        represented_hashes.append(entry.sha256)
 
         if case.sha256 is None:
             _issue(
@@ -217,15 +202,28 @@ def audit_corpus(
                     file=case.file,
                 )
 
-    for entry in canonical_entries:
-        if entry.suggested_id not in represented_canonical_ids:
+    manifest_hash_counts = Counter(represented_hashes)
+    for sha256, count in manifest_hash_counts.items():
+        if count > 1:
             _issue(
                 issues,
                 "error",
-                "corpus_file_not_in_manifest",
-                "Unique corpus PDF is not represented in the benchmark manifest.",
-                file=entry.file,
+                "duplicate_manifest_content",
+                f"The manifest benchmarks the same PDF content {count} times (SHA-256 {sha256}).",
             )
+
+    represented_unique_hashes = set(represented_hashes)
+    for sha256 in sorted(inventory_hashes - represented_unique_hashes):
+        representative = next(
+            entry for entry in inventory.documents if entry.sha256 == sha256
+        )
+        _issue(
+            issues,
+            "error",
+            "corpus_content_not_in_manifest",
+            "Unique corpus PDF content is not represented in the benchmark manifest.",
+            file=representative.file,
+        )
 
     errors = sum(issue.severity == "error" for issue in issues)
     warnings = sum(issue.severity == "warning" for issue in issues)
@@ -238,7 +236,7 @@ def audit_corpus(
         inventory_documents=inventory.documents_total,
         inventory_unique_contents=inventory.unique_contents,
         manifest_documents=len(manifest.documents),
-        represented_unique_contents=len(represented_canonical_ids),
+        represented_unique_contents=len(represented_unique_hashes),
         issues=issues,
     )
 
