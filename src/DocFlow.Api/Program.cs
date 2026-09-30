@@ -1,5 +1,6 @@
 using DocFlow.Application.Abstractions;
 using DocFlow.Infrastructure.Persistence;
+using DocFlow.Infrastructure.Processing;
 using DocFlow.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,6 +15,8 @@ var connectionString = builder.Configuration.GetConnectionString("DocFlowDbConte
 
 builder.Services.AddDbContext<DocFlowDbContext>(options =>
     options.UseNpgsql(connectionString));
+
+builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
 if (!Path.IsPathRooted(storageRoot))
