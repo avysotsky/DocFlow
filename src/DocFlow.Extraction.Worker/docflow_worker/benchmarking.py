@@ -1,3 +1,4 @@
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -11,11 +12,44 @@ from docflow_worker.structured_pipeline import extract_structured_document
 
 FailureReason = Literal[
     "processing_error",
+    "corpus_integrity_error",
     "document_type_mismatch",
     "validation_status_mismatch",
     "missing_field",
     "field_mismatch",
 ]
+
+
+class BenchmarkMetadata(BaseModel):
+    supplier: str | None = None
+    source_kind: Literal["digital", "scanned", "mixed", "unknown"] = "unknown"
+    layout_class: str | None = None
+    language: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("supplier", "layout_class", "language")
+    @classmethod
+    def _optional_text_not_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank when provided")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for tag in value:
+            tag = tag.strip()
+            if not tag:
+                raise ValueError("tags must not contain blank values")
+            if tag not in seen:
+                normalized.append(tag)
+                seen.add(tag)
+        return normalized
 
 
 class BenchmarkExpectation(BaseModel):
@@ -27,6 +61,8 @@ class BenchmarkExpectation(BaseModel):
 class BenchmarkCase(BaseModel):
     id: str
     file: str
+    sha256: str | None = None
+    metadata: BenchmarkMetadata = Field(default_factory=BenchmarkMetadata)
     document_type: Literal["auto", "supplier_quotation", "supplier_invoice"] = "auto"
     expected: BenchmarkExpectation
 
@@ -36,6 +72,16 @@ class BenchmarkCase(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("must not be blank")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def _valid_sha256(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip().lower()
+        if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+            raise ValueError("sha256 must be a 64-character hexadecimal digest")
         return value
 
 
@@ -73,6 +119,8 @@ class BenchmarkCaseResult(BaseModel):
     confidence: float | None = None
     ocr_applied: bool | None = None
     ocr_page_numbers: list[int] = Field(default_factory=list)
+    file_sha256: str | None = None
+    metadata: BenchmarkMetadata = Field(default_factory=BenchmarkMetadata)
     field_comparisons: list[FieldComparison] = Field(default_factory=list)
     failure_reasons: list[FailureReason] = Field(default_factory=list)
     error: str | None = None
@@ -105,6 +153,14 @@ def load_manifest(path: str | Path) -> BenchmarkManifest:
     manifest_path = Path(path)
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     return BenchmarkManifest.model_validate(payload)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_stream:
+        for chunk in iter(lambda: file_stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _get_path_value(root: Any, path: str) -> Any:
@@ -210,6 +266,27 @@ async def run_benchmark(
         pdf_path = (manifest_directory / case.file).resolve()
 
         try:
+            actual_sha256 = _sha256_file(pdf_path)
+
+            if case.sha256 is not None and actual_sha256 != case.sha256:
+                results.append(
+                    BenchmarkCaseResult(
+                        id=case.id,
+                        file=case.file,
+                        passed=False,
+                        expected_document_type=case.expected.document_type,
+                        expected_validation_status=case.expected.validation_status,
+                        file_sha256=actual_sha256,
+                        metadata=case.metadata,
+                        failure_reasons=["corpus_integrity_error"],
+                        error=(
+                            "SHA-256 mismatch: "
+                            f"expected {case.sha256}, actual {actual_sha256}"
+                        ),
+                    )
+                )
+                continue
+
             content = PdfContentExtractor(
                 enable_ocr=enable_ocr,
                 ocr_language=ocr_language,
@@ -251,6 +328,8 @@ async def run_benchmark(
                     confidence=structured.confidence,
                     ocr_applied=content.ocr_applied,
                     ocr_page_numbers=content.ocr_page_numbers,
+                    file_sha256=actual_sha256,
+                    metadata=case.metadata,
                     field_comparisons=comparisons,
                     failure_reasons=failure_reasons,
                 )
@@ -263,6 +342,7 @@ async def run_benchmark(
                     passed=False,
                     expected_document_type=case.expected.document_type,
                     expected_validation_status=case.expected.validation_status,
+                    metadata=case.metadata,
                     failure_reasons=["processing_error"],
                     error=f"{type(exc).__name__}: {exc}",
                 )
