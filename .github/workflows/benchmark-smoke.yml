@@ -44,12 +44,12 @@ jobs:
           cp /tmp/docflow-benchmark/corpus/quotation.pdf \
             /tmp/docflow-benchmark/corpus/quotation-duplicate.pdf
 
-      - name: Inventory benchmark corpus
+      - name: Inventory once to prepare pinned manifest hashes
         working-directory: src/DocFlow.Extraction.Worker
         run: |
           python corpus_inventory.py \
             --corpus /tmp/docflow-benchmark/corpus \
-            --output /tmp/docflow-benchmark/corpus-inventory.json
+            --output /tmp/docflow-benchmark/manifest-source-inventory.json
 
           jq -e '
             .documents_total == 3
@@ -57,16 +57,14 @@ jobs:
             and .duplicates == 1
             and .errors == 0
             and ([.documents[].source_kind] | all(. == "digital"))
-            and ([.documents[] | select(.duplicate_of != null)] | length) == 1
-            and ([.documents[] | select(.duplicate_of == null)] | length) == 2
-          ' /tmp/docflow-benchmark/corpus-inventory.json >/dev/null
+          ' /tmp/docflow-benchmark/manifest-source-inventory.json >/dev/null
 
       - name: Create benchmark manifest from inventory
         run: |
           quotation_sha=$(jq -r '.documents[] | select(.file == "quotation.pdf") | .sha256' \
-            /tmp/docflow-benchmark/corpus-inventory.json)
+            /tmp/docflow-benchmark/manifest-source-inventory.json)
           invoice_sha=$(jq -r '.documents[] | select(.file == "invoice.pdf") | .sha256' \
-            /tmp/docflow-benchmark/corpus-inventory.json)
+            /tmp/docflow-benchmark/manifest-source-inventory.json)
 
           jq -n \
             --arg quotation_sha "$quotation_sha" \
@@ -129,13 +127,24 @@ jobs:
               ]
             }' > /tmp/docflow-benchmark/manifest.json
 
-      - name: Audit corpus and manifest
+      - name: Run complete real corpus workflow
         working-directory: src/DocFlow.Extraction.Worker
         run: |
-          python corpus_audit.py \
-            --inventory /tmp/docflow-benchmark/corpus-inventory.json \
+          python real_corpus.py \
+            --corpus /tmp/docflow-benchmark/corpus \
             --manifest /tmp/docflow-benchmark/manifest.json \
-            --output /tmp/docflow-benchmark/corpus-audit.json
+            --results /tmp/docflow-benchmark/results \
+            --disable-ocr
+
+      - name: Verify inventory, audit and benchmark outputs
+        run: |
+          jq -e '
+            .documents_total == 3
+            and .unique_contents == 2
+            and .duplicates == 1
+            and .errors == 0
+            and ([.documents[] | select(.duplicate_of != null)] | length) == 1
+          ' /tmp/docflow-benchmark/results/corpus-inventory.json >/dev/null
 
           jq -e '
             .errors == 0
@@ -145,18 +154,8 @@ jobs:
             and .manifest_documents == 2
             and .represented_unique_contents == 2
             and ([.issues[] | select(.code == "duplicate_content_present")] | length) == 1
-          ' /tmp/docflow-benchmark/corpus-audit.json >/dev/null
+          ' /tmp/docflow-benchmark/results/corpus-audit.json >/dev/null
 
-      - name: Run benchmark CLI
-        working-directory: src/DocFlow.Extraction.Worker
-        run: |
-          python benchmark.py \
-            --manifest /tmp/docflow-benchmark/manifest.json \
-            --output /tmp/docflow-benchmark/report.json \
-            --disable-ocr
-
-      - name: Verify report metrics and breakdowns
-        run: |
           jq -e '
             .metrics.documents_total == 2
             and .metrics.documents_passed == 2
@@ -173,6 +172,6 @@ jobs:
             and .breakdowns.by_layout_class.table.documents_total == 1
             and .breakdowns.by_language.en.documents_total == 2
             and ([.documents[].file_sha256] | all(length == 64))
-          ' /tmp/docflow-benchmark/report.json >/dev/null
+          ' /tmp/docflow-benchmark/results/benchmark-report.json >/dev/null
 
-          echo "Corpus inventory + audit + benchmark smoke passed."
+          echo "End-to-end real corpus workflow smoke passed."
