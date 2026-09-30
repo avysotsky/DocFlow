@@ -3,7 +3,12 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from docflow_worker.engines.base import StructuredExtractionEngine
-from docflow_worker.models import DocumentContent, StructuredExtractionResult, TableContent
+from docflow_worker.models import (
+    BoundingBox,
+    DocumentContent,
+    StructuredExtractionResult,
+    TableContent,
+)
 from docflow_worker.supplier_quotation_models import (
     SupplierQuotationData,
     SupplierQuotationItem,
@@ -11,7 +16,7 @@ from docflow_worker.supplier_quotation_models import (
 
 
 class DeterministicSupplierQuotationEngine(StructuredExtractionEngine):
-    """Deterministic parser for supplier quotations with extractable tables."""
+    """Deterministic parser for supplier quotations with tabular or borderless layout."""
 
     @property
     def name(self) -> str:
@@ -69,14 +74,31 @@ class DeterministicSupplierQuotationEngine(StructuredExtractionEngine):
                 if not cls._looks_like_metadata_table(table):
                     continue
 
-                for row in table.rows:
-                    for index in range(0, len(row) - 1, 2):
-                        key = cls._normalize_header(row[index])
-                        value = cls._clean_cell(row[index + 1])
-                        if key and value:
-                            metadata[key] = value
+                cls._collect_metadata_rows(metadata, table.rows)
+
+            # Borderless digital PDFs often preserve visual columns as runs of spaces
+            # even when no vector lines exist for table detection. Use this only as a
+            # fallback source and never overwrite metadata already extracted from a table.
+            borderless_rows = cls._layout_rows(page.text)
+            borderless_metadata: dict[str, str] = {}
+            cls._collect_metadata_rows(borderless_metadata, borderless_rows)
+            for key, value in borderless_metadata.items():
+                metadata.setdefault(key, value)
 
         return metadata
+
+    @classmethod
+    def _collect_metadata_rows(
+        cls,
+        target: dict[str, str],
+        rows: list[list[str | None]],
+    ) -> None:
+        for row in rows:
+            for index in range(0, len(row) - 1, 2):
+                key = cls._normalize_header(row[index])
+                value = cls._clean_cell(row[index + 1])
+                if key and value:
+                    target[key] = value
 
     @classmethod
     def _looks_like_metadata_table(cls, table: TableContent) -> bool:
@@ -96,18 +118,87 @@ class DeterministicSupplierQuotationEngine(StructuredExtractionEngine):
     def _find_item_table(cls, content: DocumentContent) -> TableContent | None:
         for page in content.pages:
             for table in page.tables:
-                if not table.rows:
-                    continue
-
-                headers = [cls._normalize_header(cell) for cell in table.rows[0]]
-                if (
-                    "sku" in headers
-                    and "description" in headers
-                    and ("qty" in headers or "quantity" in headers)
-                ):
+                if cls._looks_like_item_table(table.rows):
                     return table
 
+        # No line-based table was found. Reconstruct the item table from layout-preserved
+        # text columns. This keeps the semantic parser deterministic while supporting
+        # digital quotations whose table has no drawn borders.
+        for page in content.pages:
+            rows = cls._layout_rows(page.text)
+            for index, row in enumerate(rows):
+                if not cls._looks_like_item_table([row]):
+                    continue
+
+                item_rows: list[list[str | None]] = [row]
+                for candidate in rows[index + 1 :]:
+                    if cls._is_item_table_terminator(candidate):
+                        break
+                    if len(candidate) < 3:
+                        break
+                    item_rows.append(candidate)
+
+                if len(item_rows) > 1:
+                    return TableContent(
+                        bbox=BoundingBox(
+                            x0=0,
+                            y0=0,
+                            x1=page.width,
+                            y1=page.height,
+                        ),
+                        rows=item_rows,
+                    )
+
         return None
+
+    @classmethod
+    def _looks_like_item_table(cls, rows: list[list[str | None]]) -> bool:
+        if not rows:
+            return False
+
+        headers = [cls._normalize_header(cell) for cell in rows[0]]
+        return (
+            "sku" in headers
+            and "description" in headers
+            and ("qty" in headers or "quantity" in headers)
+        )
+
+    @classmethod
+    def _is_item_table_terminator(cls, row: list[str | None]) -> bool:
+        if not row:
+            return True
+
+        first = cls._normalize_header(row[0])
+        return first in {
+            "subtotal",
+            "vat",
+            "total",
+            "payment terms",
+            "delivery",
+            "warranty",
+            "notes",
+            "prepared by",
+            "quote status",
+        }
+
+    @staticmethod
+    def _layout_rows(text: str) -> list[list[str | None]]:
+        rows: list[list[str | None]] = []
+
+        for line in text.splitlines():
+            clean_line = line.strip()
+            if not clean_line:
+                continue
+
+            cells = [
+                cell.strip()
+                for cell in re.split(r"[ \t]{2,}", clean_line)
+                if cell.strip()
+            ]
+            if len(cells) >= 2:
+                rows.append(cells)
+
+        return rows
 
     @classmethod
     def _extract_items(cls, table: TableContent) -> list[SupplierQuotationItem]:
