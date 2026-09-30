@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class SupplierInvoiceItem(BaseModel):
-    sku: str
+    sku: str | None = None
     description: str
     quantity: Decimal
     unit: str | None = None
