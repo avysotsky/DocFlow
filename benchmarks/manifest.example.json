@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "id": "supplier-a-quotation-001",
+      "file": "corpus/supplier-a-quotation-001.pdf",
+      "document_type": "auto",
+      "expected": {
+        "document_type": "supplier_quotation",
+        "validation_status": "valid",
+        "fields": {
+          "data.quotation_number": "QT-001",
+          "data.currency": "EUR",
+          "data.items.0.sku": "AX-100",
+          "data.total": "1748.40"
+        }
+      }
+    },
+    {
+      "id": "supplier-b-invoice-001",
+      "file": "corpus/supplier-b-invoice-001.pdf",
+      "document_type": "auto",
+      "expected": {
+        "document_type": "supplier_invoice",
+        "validation_status": "valid",
+        "fields": {
+          "data.invoice_number": "INV-001",
+          "data.currency": "EUR",
+          "data.purchase_order_number": "PO-001",
+          "data.total": "672.00"
+        }
+      }
+    }
+  ]
+}
