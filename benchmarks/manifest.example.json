@@ -4,6 +4,14 @@
     {
       "id": "supplier-a-quotation-001",
       "file": "corpus/supplier-a-quotation-001.pdf",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "metadata": {
+        "supplier": "supplier-a",
+        "source_kind": "digital",
+        "layout_class": "single-page-borderless",
+        "language": "en",
+        "tags": ["quotation", "vat"]
+      },
       "document_type": "auto",
       "expected": {
         "document_type": "supplier_quotation",
@@ -19,6 +27,14 @@
     {
       "id": "supplier-b-invoice-001",
       "file": "corpus/supplier-b-invoice-001.pdf",
+      "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "metadata": {
+        "supplier": "supplier-b",
+        "source_kind": "scanned",
+        "layout_class": "single-page-table",
+        "language": "en",
+        "tags": ["invoice", "purchase-order"]
+      },
       "document_type": "auto",
       "expected": {
         "document_type": "supplier_invoice",
