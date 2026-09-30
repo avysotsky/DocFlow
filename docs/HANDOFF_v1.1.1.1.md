@@ -53,7 +53,7 @@ PostgreSQL / Excel / CSV / external API / ERP
 - `.github/workflows/dotnet-ci.yml`
 - `.github/workflows/python-worker-ci.yml`
 
-Обе части проекта собираются/проверяются через GitHub Actions.
+Обе части проекта собираются/проверяются через GitHub Actions. На момент версии 1.1.1.1 workflows настроены на push/pull request в `main`; push только в snapshot-ветку сам по себе CI не запускает.
 
 ## 3. Структура solution
 
@@ -65,6 +65,11 @@ src/
   DocFlow.Domain/
   DocFlow.Infrastructure/
   DocFlow.Extraction.Worker/
+    docflow_worker/
+    tests/
+    output/          # локальные runtime-результаты worker, содержимое игнорируется Git
+    main.py
+    pyproject.toml
 ```
 
 Архитектурная граница на текущем этапе:
@@ -72,6 +77,13 @@ src/
 - .NET API отвечает за application flow, storage, статусы документов и persistence.
 - Python worker отвечает за parsing, semantic extraction и deterministic validation.
 - Python не должен напрямую писать в PostgreSQL.
+
+Git hygiene:
+
+- `*.egg-info/` игнорируется как генерируемая metadata Python package;
+- содержимое `src/DocFlow.Extraction.Worker/output/` игнорируется;
+- сама `output/` сохраняется в репозитории через `.gitkeep`;
+- legacy extraction outputs, созданные ранее рядом с `main.py`, также перечислены в `.gitignore` и не должны коммититься.
 
 ## 4. PostgreSQL и EF Core
 
@@ -395,6 +407,20 @@ python main.py `
   --output-structured-json quotation-structured.json
 ```
 
+После версии 1.1.1.1 простой output filename автоматически разрешается в dedicated worker output directory. То есть команда выше пишет фактически в:
+
+```text
+src/DocFlow.Extraction.Worker/output/quotation-structured.json
+```
+
+Если передан абсолютный путь или путь с собственной директорией, CLI использует его как есть.
+
+Аналогично обрабатываются:
+
+- `--output-text`
+- `--output-json`
+- `--output-structured-json`
+
 Проверенный результат:
 
 ```text
@@ -408,7 +434,7 @@ validationStatus = valid
 confidence = 1.0
 ```
 
-Generated files (`quotation-layout.json`, `quotation-structured.json`, extracted text, storage PDFs) не должны коммититься в Git.
+Generated files (`quotation-layout.json`, `quotation-structured.json`, extracted text, storage PDFs) не должны коммититься в Git. Новые worker outputs должны храниться в `src/DocFlow.Extraction.Worker/output/`.
 
 ## 13. Проверенный synthetic supplier quotation
 
