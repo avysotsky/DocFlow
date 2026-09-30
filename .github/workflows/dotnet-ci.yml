@@ -2,7 +2,9 @@ name: .NET CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - DocFlow/v_1.1.1.2_Automation
     paths:
       - '**/*.cs'
       - '**/*.csproj'
@@ -15,6 +17,7 @@ on:
       - '**/*.csproj'
       - '**/*.sln'
       - '.github/workflows/dotnet-ci.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
