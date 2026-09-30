@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
       - '.github/scripts/correct_public_reference_selection.py'
+      - '.github/scripts/annotate_public_reference_validation.py'
       - '.github/scripts/dump_public_reference_text.py'
       - '.github/scripts/dump_public_reference_processed_text.py'
       - '.github/workflows/public-reference-benchmark.yml'
@@ -53,6 +54,9 @@ jobs:
 
           python .github/scripts/correct_public_reference_selection.py \
             --root /tmp/docflow-public-reference
+
+          python .github/scripts/annotate_public_reference_validation.py \
+            --manifest /tmp/docflow-public-reference/manifest.json
 
           python .github/scripts/dump_public_reference_text.py \
             --corpus /tmp/docflow-public-reference/corpus \
@@ -140,6 +144,20 @@ jobs:
             echo "real_corpus.py did not report an exit code."
             exit 1
           fi
+
+          report=/tmp/docflow-public-reference/results/benchmark-report.json
+          if [ ! -f "$report" ]; then
+            echo "Benchmark report was not produced."
+            exit 1
+          fi
+
+          total=$(jq -r '.metrics.documents_total' "$report")
+          checked=$(jq -r '.metrics.validation_status_checked' "$report")
+          if [ "$checked" -ne "$total" ]; then
+            echo "Validation-status ground truth is incomplete: checked $checked of $total documents."
+            exit 1
+          fi
+
           if [ "$code" -ne 0 ]; then
             echo "Public reference benchmark failed with exit code $code."
             exit "$code"
