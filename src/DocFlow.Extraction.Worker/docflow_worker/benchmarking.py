@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any, Literal
 
@@ -6,6 +7,15 @@ from pydantic import BaseModel, Field, field_validator
 
 from docflow_worker.pdf_content_extractor import PdfContentExtractor
 from docflow_worker.structured_pipeline import extract_structured_document
+
+
+FailureReason = Literal[
+    "processing_error",
+    "document_type_mismatch",
+    "validation_status_mismatch",
+    "missing_field",
+    "field_mismatch",
+]
 
 
 class BenchmarkExpectation(BaseModel):
@@ -64,6 +74,7 @@ class BenchmarkCaseResult(BaseModel):
     ocr_applied: bool | None = None
     ocr_page_numbers: list[int] = Field(default_factory=list)
     field_comparisons: list[FieldComparison] = Field(default_factory=list)
+    failure_reasons: list[FailureReason] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -80,6 +91,7 @@ class BenchmarkMetrics(BaseModel):
     fields_checked: int
     fields_matched: int
     field_accuracy: float | None
+    failure_reason_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class BenchmarkReport(BaseModel):
@@ -148,6 +160,38 @@ def compare_expected_fields(
     return comparisons
 
 
+def classify_failure_reasons(
+    *,
+    expected_document_type: str,
+    actual_document_type: str | None,
+    expected_validation_status: str | None,
+    actual_validation_status: str | None,
+    comparisons: list[FieldComparison],
+    processing_error: bool = False,
+) -> list[FailureReason]:
+    reasons: list[FailureReason] = []
+
+    if processing_error:
+        return ["processing_error"]
+
+    if actual_document_type != expected_document_type:
+        reasons.append("document_type_mismatch")
+
+    if (
+        expected_validation_status is not None
+        and actual_validation_status != expected_validation_status
+    ):
+        reasons.append("validation_status_mismatch")
+
+    if any(not comparison.matched and comparison.error for comparison in comparisons):
+        reasons.append("missing_field")
+
+    if any(not comparison.matched and comparison.error is None for comparison in comparisons):
+        reasons.append("field_mismatch")
+
+    return reasons
+
+
 async def run_benchmark(
     manifest_path: str | Path,
     *,
@@ -187,6 +231,13 @@ async def run_benchmark(
                 or structured.validation_status == case.expected.validation_status
             )
             fields_correct = all(comparison.matched for comparison in comparisons)
+            failure_reasons = classify_failure_reasons(
+                expected_document_type=case.expected.document_type,
+                actual_document_type=structured.document_type,
+                expected_validation_status=case.expected.validation_status,
+                actual_validation_status=structured.validation_status,
+                comparisons=comparisons,
+            )
 
             results.append(
                 BenchmarkCaseResult(
@@ -201,6 +252,7 @@ async def run_benchmark(
                     ocr_applied=content.ocr_applied,
                     ocr_page_numbers=content.ocr_page_numbers,
                     field_comparisons=comparisons,
+                    failure_reasons=failure_reasons,
                 )
             )
         except Exception as exc:
@@ -211,6 +263,7 @@ async def run_benchmark(
                     passed=False,
                     expected_document_type=case.expected.document_type,
                     expected_validation_status=case.expected.validation_status,
+                    failure_reasons=["processing_error"],
                     error=f"{type(exc).__name__}: {exc}",
                 )
             )
@@ -254,6 +307,11 @@ def _build_metrics(results: list[BenchmarkCaseResult]) -> BenchmarkMetrics:
         for comparison in result.field_comparisons
     ]
     fields_matched = sum(comparison.matched for comparison in comparisons)
+    failure_reason_counts = Counter(
+        reason
+        for result in results
+        for reason in result.failure_reasons
+    )
 
     return BenchmarkMetrics(
         documents_total=documents_total,
@@ -274,4 +332,5 @@ def _build_metrics(results: list[BenchmarkCaseResult]) -> BenchmarkMetrics:
         fields_checked=len(comparisons),
         fields_matched=fields_matched,
         field_accuracy=(fields_matched / len(comparisons) if comparisons else None),
+        failure_reason_counts=dict(sorted(failure_reason_counts.items())),
     )
