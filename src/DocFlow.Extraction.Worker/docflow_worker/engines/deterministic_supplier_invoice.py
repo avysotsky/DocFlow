@@ -1,5 +1,7 @@
-import re
-
+from docflow_worker.deterministic_text_fields import (
+    extract_totals_from_text,
+    infer_currency,
+)
 from docflow_worker.engines.deterministic_supplier_quotation import (
     DeterministicSupplierQuotationEngine,
 )
@@ -40,7 +42,10 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
             due_date=self._parse_date(
                 self._metadata_value(metadata, "due date", "payment due")
             ),
-            currency=self._metadata_value(metadata, "currency"),
+            currency=(
+                self._metadata_value(metadata, "currency")
+                or infer_currency(content)
+            ),
             customer_reference=self._metadata_value(
                 metadata,
                 "customer ref",
@@ -100,30 +105,18 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
         content: DocumentContent,
         invoice: SupplierInvoiceData,
     ) -> None:
-        number_pattern = re.compile(r"[-+]?\d[\d\s.,]*")
+        totals = extract_totals_from_text(content, cls._parse_decimal)
+        invoice.subtotal = totals["subtotal"]
+        invoice.vat_rate = totals["vat_rate"]
+        invoice.vat_amount = totals["vat_amount"]
+        invoice.total = totals["total"]
 
         for page in content.pages:
             for block in page.blocks:
                 text = block.text.strip()
                 lower_text = text.lower()
-                numbers = [
-                    value
-                    for value in (
-                        cls._parse_decimal(match.group())
-                        for match in number_pattern.finditer(text)
-                    )
-                    if value is not None
-                ]
 
-                if lower_text.startswith("subtotal") and numbers:
-                    invoice.subtotal = numbers[-1]
-                elif lower_text.startswith("vat") and numbers:
-                    if "%" in text and len(numbers) >= 2:
-                        invoice.vat_rate = numbers[0]
-                    invoice.vat_amount = numbers[-1]
-                elif lower_text.startswith("total") and numbers:
-                    invoice.total = numbers[-1]
-                elif lower_text.startswith("payment terms:"):
+                if lower_text.startswith("payment terms:"):
                     invoice.payment_terms = text.split(":", 1)[1].strip()
                 elif lower_text.startswith("notes:"):
                     invoice.notes = text.split(":", 1)[1].strip()
