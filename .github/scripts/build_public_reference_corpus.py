@@ -7,6 +7,7 @@ SHA-256, and writes a benchmark manifest with independently transcribed ground t
 
 Page selection first uses native PDF text. If a public source pack has a broken or
 image-only text layer, Tesseract OCR is used only to locate the matching original page.
+OCR search is bounded per source so large archive/report PDFs cannot dominate CI time.
 The selected page itself is copied unchanged into the benchmark corpus.
 """
 
@@ -115,6 +116,7 @@ SOURCES: list[dict[str, Any]] = [
         "marker": "Soft-Tech Consultants",
         "supplier": "Soft-Tech Consultants Ltd",
         "layout_class": "embedded-legacy-proforma",
+        "ocr_page_limit": 0,
         "expected": {
             "document_type": "supplier_invoice",
             "fields": {
@@ -192,6 +194,22 @@ SOURCES: list[dict[str, Any]] = [
                 "data.total": "216.00"
             }
         }
+    },
+    {
+        "id": "jordan-customs-commercial-invoice-2019014782",
+        "url": "https://tradeportal.customs.gov.jo/media/%D9%81%D8%A7%D8%AA%D9%88%D8%B1%D8%A9%20%D8%AA%D8%B5%D8%AF%D9%8A%D8%B1%D9%8A%D8%A9%20%D8%BA%D8%B0%D8%A7%D8%A6%D9%8A%D8%A9.pdf",
+        "marker": "2019014782",
+        "supplier": "Jordan export commercial invoice",
+        "layout_class": "bilingual-commercial-invoice",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "2019014782",
+                "data.currency": "USD",
+                "data.subtotal": "27372.74",
+                "data.total": "28672.74"
+            }
+        }
     }
 ]
 
@@ -245,7 +263,13 @@ def _page_ocr_text(page: fitz.Page) -> str:
     return completed.stdout.decode("utf-8", errors="replace")
 
 
-def extract_matching_page(source_pdf: Path, marker: str, target_pdf: Path) -> dict[str, Any]:
+def extract_matching_page(
+    source_pdf: Path,
+    marker: str,
+    target_pdf: Path,
+    *,
+    ocr_page_limit: int = 30,
+) -> dict[str, Any]:
     with fitz.open(source_pdf) as source:
         normalized_marker = _normalize_marker_text(marker)
         matching_pages = [
@@ -256,9 +280,16 @@ def extract_matching_page(source_pdf: Path, marker: str, target_pdf: Path) -> di
         selection_method = "native_text"
         ocr_pages_checked = 0
 
-        if not matching_pages and source.page_count > 1 and shutil.which("tesseract"):
+        if (
+            not matching_pages
+            and source.page_count > 1
+            and ocr_page_limit > 0
+            and shutil.which("tesseract")
+        ):
             selection_method = "ocr"
-            for index, page in enumerate(source):
+            pages_to_check = min(source.page_count, ocr_page_limit)
+            for index in range(pages_to_check):
+                page = source[index]
                 ocr_pages_checked += 1
                 ocr_text = _page_ocr_text(page)
                 if normalized_marker in _normalize_marker_text(ocr_text):
@@ -272,7 +303,8 @@ def extract_matching_page(source_pdf: Path, marker: str, target_pdf: Path) -> di
             else:
                 raise ValueError(
                     f"Marker {marker!r} not found in {source.page_count}-page source PDF "
-                    f"after native-text/OCR search ({ocr_pages_checked} OCR pages checked)"
+                    f"after native-text/OCR search ({ocr_pages_checked} OCR pages checked; "
+                    f"limit={ocr_page_limit})"
                 )
 
         page_index = matching_pages[0]
@@ -288,6 +320,7 @@ def extract_matching_page(source_pdf: Path, marker: str, target_pdf: Path) -> di
             "matching_pages": [index + 1 for index in matching_pages],
             "page_selection_method": selection_method,
             "ocr_pages_checked": ocr_pages_checked,
+            "ocr_page_limit": ocr_page_limit,
         }
 
 
@@ -312,7 +345,12 @@ def build(output_root: Path) -> dict[str, Any]:
 
         try:
             download_pdf(source["url"], raw_path)
-            page_info = extract_matching_page(raw_path, source["marker"], corpus_path)
+            page_info = extract_matching_page(
+                raw_path,
+                source["marker"],
+                corpus_path,
+                ocr_page_limit=int(source.get("ocr_page_limit", 30)),
+            )
             digest = sha256(corpus_path)
             with fitz.open(corpus_path) as selected:
                 native_text_chars = sum(
