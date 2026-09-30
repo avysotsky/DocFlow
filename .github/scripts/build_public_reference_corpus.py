@@ -196,6 +196,39 @@ SOURCES: list[dict[str, Any]] = [
         }
     },
     {
+        "id": "town-house-publishing-invoice-0023902",
+        "url": "https://www.bucklandandchipping-pc.gov.uk/media/Meetings/Files/331/meeting%20331%20merged%20invoices.pdf",
+        "marker": "0023902",
+        "supplier": "Town House Publishing Limited",
+        "layout_class": "embedded-line-discount-table",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "0023902",
+                "data.currency": "GBP",
+                "data.subtotal": "103.50",
+                "data.vat_amount": "20.70",
+                "data.total": "124.20"
+            }
+        }
+    },
+    {
+        "id": "tomlinson-groundcare-invoice-139107",
+        "url": "https://ringshall-pc.gov.uk/assets/Parish-Council-Documents/Additional-Information/2023-2024/23rd-May-2023/Invoice-139107-1-Lawnmower.PDF",
+        "marker": "139107",
+        "supplier": "Tomlinson Groundcare",
+        "layout_class": "single-page-separate-discount-row",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "139107",
+                "data.subtotal": "415.84",
+                "data.vat_amount": "83.16",
+                "data.total": "499.00"
+            }
+        }
+    },
+    {
         "id": "jordan-customs-commercial-invoice-2019014782",
         "url": "https://tradeportal.customs.gov.jo/media/%D9%81%D8%A7%D8%AA%D9%88%D8%B1%D8%A9%20%D8%AA%D8%B5%D8%AF%D9%8A%D8%B1%D9%8A%D8%A9%20%D8%BA%D8%B0%D8%A7%D8%A6%D9%8A%D8%A9.pdf",
         "marker": "2019014782",
