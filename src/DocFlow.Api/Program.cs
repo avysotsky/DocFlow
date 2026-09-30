@@ -1,3 +1,4 @@
+using DocFlow.Api.BackgroundServices;
 using DocFlow.Application.Abstractions;
 using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
@@ -18,6 +19,8 @@ builder.Services.AddDbContext<DocFlowDbContext>(options =>
 
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
+builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
+builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
 if (!Path.IsPathRooted(storageRoot))
