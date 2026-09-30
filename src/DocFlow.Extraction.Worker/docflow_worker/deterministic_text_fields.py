@@ -92,7 +92,6 @@ def extract_labeled_text_value(
 
             # Same-line forms such as "Invoice Number: INV-2180" or
             # "Invoice No. INV-2180".
-            lowered = line.strip().lower()
             for raw_label in labels:
                 pattern = re.compile(
                     rf"^{re.escape(raw_label)}\s*[:.#-]?\s*(.+)$",
@@ -158,6 +157,7 @@ def extract_totals_from_text(
     vat_rate: Decimal | None = None
     vat_amount: Decimal | None = None
     total: Decimal | None = None
+    total_priority = -1
 
     for index, line in enumerate(lines):
         normalized = " ".join(line.lower().split())
@@ -193,8 +193,10 @@ def extract_totals_from_text(
 
         if _TOTAL_PATTERN.match(normalized):
             amount = _amount_for_labeled_line(lines, index, numbers, parse_decimal)
-            if amount is not None:
+            priority = _total_label_priority(normalized)
+            if amount is not None and priority >= total_priority:
                 total = amount
+                total_priority = priority
 
     # Some legacy proformas expose the final numeric amount beside/after the
     # "Amount in Words" section rather than using a dedicated TOTAL label.
@@ -252,6 +254,20 @@ def _invoice_identifier_from_text(text: str) -> str | None:
         if match:
             return match.group(0).strip()
     return None
+
+
+def _total_label_priority(normalized: str) -> int:
+    """Rank gross invoice totals above settlement/balance amounts.
+
+    A paid invoice can legitimately show both ``TOTAL GBP 2.99`` and a later
+    ``AMOUNT DUE GBP 0.00``. ``amount due`` is a remaining balance, not the invoice
+    gross total, so it must never overwrite a stronger total already observed.
+    """
+    if normalized.startswith("amount due"):
+        return 1
+    if normalized.startswith("total due"):
+        return 2
+    return 3
 
 
 def _numbers(
