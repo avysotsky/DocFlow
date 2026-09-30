@@ -41,7 +41,7 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Compile
-        run: python -m compileall -q docflow_worker main.py benchmark.py corpus_inventory.py
+        run: python -m compileall -q docflow_worker main.py benchmark.py corpus_inventory.py corpus_audit.py
 
       - name: Test
         run: pytest -q
