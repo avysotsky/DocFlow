@@ -26,6 +26,7 @@ def draw_table(page, x_positions, y_positions, rows, font_size=7):
 
 def main() -> None:
     output_path = Path(sys.argv[1] if len(sys.argv) > 1 else "supplier-quotation.pdf")
+    grand_total = sys.argv[2] if len(sys.argv) > 2 else "1748.40"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     document = pymupdf.open()
@@ -81,7 +82,7 @@ def main() -> None:
     )
     page.insert_textbox(
         pymupdf.Rect(30, 415, 330, 438),
-        "Total: 1748.40 EUR",
+        f"Total: {grand_total} EUR",
         fontsize=9,
     )
     page.insert_textbox(
