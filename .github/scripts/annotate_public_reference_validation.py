@@ -19,10 +19,10 @@ from pathlib import Path
 
 # These expectations are based on the source document structure, not on DocFlow output.
 #
-# `valid` means the source visibly contains the quantities/unit prices/line totals plus
-# subtotal, VAT rate/amount and grand total needed by SupplierInvoiceValidator.
-# `incomplete` means at least one of those arithmetic inputs is genuinely absent or not
-# explicit enough in the source to be independent ground truth.
+# `valid` means the source visibly contains enough item/discount/tax arithmetic to
+# establish its totals independently, even if the current DocFlow validator does not
+# yet model every operation. `incomplete` means required arithmetic inputs are genuinely
+# absent or not explicit enough in the source to be independent ground truth.
 EXPECTED_VALIDATION_STATUS: dict[str, str] = {
     # VAT amount is present, but the VAT rate is not explicitly stated.
     "asar-proforma-pr-46039": "incomplete",
@@ -31,12 +31,17 @@ EXPECTED_VALIDATION_STATUS: dict[str, str] = {
     # quantity + unit-price item structure required for all validator checks.
     "hw-pickrell-proforma-hwi-2403005": "incomplete",
 
-    # The source table contains item pricing plus subtotal, VAT 20% and grand total.
+    # The source tables contain enough item pricing/tax arithmetic to verify totals.
     "trea-kids-proforma-1056": "valid",
     "hcc-solutions-invoice-inv-2180": "valid",
     "hugofox-invoice-inv-23226": "valid",
     "rainfords-farm-invoice-inv-0011": "valid",
     "mulberry-las-invoice-inv-1021": "valid",
+
+    # Real discount hard cases. Their visible arithmetic is complete, but line totals
+    # are discounted rather than simply quantity * undiscounted unit price.
+    "town-house-publishing-invoice-0023902": "valid",
+    "tomlinson-groundcare-invoice-139107": "valid",
 
     # The commercial invoice exposes subtotal and total but no VAT rate/amount; the
     # current validator therefore cannot independently complete its VAT/total checks.
