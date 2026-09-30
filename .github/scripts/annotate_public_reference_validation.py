@@ -39,9 +39,10 @@ EXPECTED_VALIDATION_STATUS: dict[str, str] = {
     "mulberry-las-invoice-inv-1021": "valid",
 
     # Real discount hard cases. Their visible arithmetic is complete, but line totals
-    # are discounted rather than simply quantity * undiscounted unit price.
+    # or invoice totals are discounted rather than simply quantity * undiscounted price.
     "town-house-publishing-invoice-0023902": "valid",
     "tomlinson-groundcare-invoice-139107": "valid",
+    "phoenix-petroleum-invoice-472557": "valid",
 
     # The commercial invoice exposes subtotal and total but no VAT rate/amount; the
     # current validator therefore cannot independently complete its VAT/total checks.
