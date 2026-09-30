@@ -176,3 +176,57 @@ def test_extracts_symbol_currency_and_derives_missing_subtotal() -> None:
     assert invoice.vat_rate == Decimal("20")
     assert invoice.vat_amount == Decimal("7400.00")
     assert invoice.total == Decimal("44400.00")
+
+
+def test_extracts_invoice_number_after_intervening_ocr_noise() -> None:
+    content = DocumentContent(
+        pages=[
+            PageContent(
+                page_number=1,
+                width=595,
+                height=842,
+                text=(
+                    "TAX INVOICE\n"
+                    "Invoice Number\n"
+                    "Northampton]\n"
+                    "INV-2180\n"
+                    "TOTAL GBP\n"
+                    "939.45\n"
+                ),
+                words=[],
+                blocks=[],
+                tables=[],
+            )
+        ]
+    )
+
+    result = asyncio.run(DeterministicSupplierInvoiceEngine().extract(content))
+    invoice = SupplierInvoiceData.model_validate(result.data)
+
+    assert invoice.invoice_number == "INV-2180"
+
+
+def test_extracts_numeric_invoice_number_from_noisy_ocr_line() -> None:
+    content = DocumentContent(
+        pages=[
+            PageContent(
+                page_number=1,
+                width=595,
+                height=842,
+                text=(
+                    "COMMERCIAL INVOICE\n"
+                    "Invoice Number\n"
+                    "/é ial p5pt     2019014782                        Buyer /\\S)isuol|:\n"
+                    "Currency USD\n"
+                ),
+                words=[],
+                blocks=[],
+                tables=[],
+            )
+        ]
+    )
+
+    result = asyncio.run(DeterministicSupplierInvoiceEngine().extract(content))
+    invoice = SupplierInvoiceData.model_validate(result.data)
+
+    assert invoice.invoice_number == "2019014782"
