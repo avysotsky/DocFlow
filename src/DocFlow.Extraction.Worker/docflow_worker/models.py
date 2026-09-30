@@ -47,6 +47,7 @@ class PageContent(BaseModel):
     blocks: list[TextBlockContent]
     words: list[WordContent]
     tables: list[TableContent]
+    ocr_applied: bool = False
 
     @computed_field
     @property
@@ -83,6 +84,16 @@ class DocumentContent(BaseModel):
     @property
     def needs_ocr(self) -> bool:
         return self.page_count > 0 and self.pages_with_text == 0
+
+    @computed_field
+    @property
+    def ocr_page_numbers(self) -> list[int]:
+        return [page.page_number for page in self.pages if page.ocr_applied]
+
+    @computed_field
+    @property
+    def ocr_applied(self) -> bool:
+        return bool(self.ocr_page_numbers)
 
     @computed_field
     @property
