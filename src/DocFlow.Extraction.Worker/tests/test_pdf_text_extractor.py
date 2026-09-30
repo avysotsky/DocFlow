@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pymupdf
+import pytest
 
 from docflow_worker.pdf_content_extractor import PdfContentExtractor
 
@@ -20,6 +21,8 @@ def test_extracts_text_blocks_words_and_coordinates(tmp_path: Path) -> None:
     assert content.pages_with_text == 1
     assert content.empty_page_numbers == []
     assert content.needs_ocr is False
+    assert content.ocr_applied is False
+    assert content.ocr_page_numbers == []
     assert "DocFlow test invoice" in content.text
 
     page_content = content.pages[0]
@@ -75,3 +78,46 @@ def test_marks_image_only_or_empty_pdf_for_ocr(tmp_path: Path) -> None:
     assert content.pages_with_text == 0
     assert content.empty_page_numbers == [1]
     assert content.needs_ocr is True
+    assert content.ocr_applied is False
+
+
+def test_ocr_extracts_text_from_image_only_pdf(tmp_path: Path) -> None:
+    try:
+        tessdata = pymupdf.get_tessdata()
+    except Exception:
+        pytest.skip("Tesseract tessdata is not available in this environment.")
+
+    source = pymupdf.open()
+    source_page = source.new_page(width=595, height=842)
+    source_page.insert_textbox(
+        pymupdf.Rect(60, 100, 535, 220),
+        "DOCFLOW SCANNED INVOICE\nInvoice No. INV-2026-091",
+        fontsize=24,
+    )
+    pixmap = source_page.get_pixmap(dpi=200, alpha=False)
+    source.close()
+
+    pdf_path = tmp_path / "scanned-text.pdf"
+    scanned = pymupdf.open()
+    scanned_page = scanned.new_page(width=595, height=842)
+    scanned_page.insert_image(scanned_page.rect, pixmap=pixmap)
+    scanned.save(pdf_path)
+    scanned.close()
+
+    without_ocr = PdfContentExtractor().extract(pdf_path)
+    assert without_ocr.needs_ocr is True
+
+    content = PdfContentExtractor(
+        enable_ocr=True,
+        ocr_language="eng",
+        ocr_dpi=300,
+        tessdata=tessdata,
+    ).extract(pdf_path)
+
+    assert content.page_count == 1
+    assert content.ocr_applied is True
+    assert content.ocr_page_numbers == [1]
+    assert content.needs_ocr is False
+    assert "DOCFLOW" in content.text.upper()
+    assert "INVOICE" in content.text.upper()
+    assert content.pages[0].words
