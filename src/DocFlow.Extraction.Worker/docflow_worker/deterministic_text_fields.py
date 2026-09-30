@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Sequence
 
 from docflow_worker.models import DocumentContent
 
@@ -32,9 +32,18 @@ _CURRENCY_SYMBOLS = (
 )
 
 _NUMBER_PATTERN = re.compile(r"[-+]?\d[\d\s.,]*")
+_PERCENT_PATTERN = re.compile(r"[-+]?\d+(?:[.,]\d+)?\s*%")
 _SUBTOTAL_PATTERN = re.compile(r"^sub[\s-]*total\b", re.IGNORECASE)
 _VAT_PATTERN = re.compile(r"^(?:vat|tax)\b", re.IGNORECASE)
-_TOTAL_PATTERN = re.compile(r"^(?:grand\s+total|total)\b", re.IGNORECASE)
+_TOTAL_PATTERN = re.compile(
+    r"^(?:grand\s+total|invoice\s+total|final\s+total(?:\s+with\s+vat)?|total\s+due|amount\s+due|total)\b",
+    re.IGNORECASE,
+)
+_AMOUNT_IN_WORDS_PATTERN = re.compile(r"^amount\s+in\s+words\b", re.IGNORECASE)
+_VAT_IDENTIFIER_PATTERN = re.compile(
+    r"^(?:vat|tax)\s+(?:number|no\.?|id|reg(?:istration)?(?:\s+no\.?)?)\b",
+    re.IGNORECASE,
+)
 
 
 def infer_currency(content: DocumentContent) -> str | None:
@@ -56,16 +65,44 @@ def infer_currency(content: DocumentContent) -> str | None:
     return None
 
 
+def extract_labeled_text_value(
+    content: DocumentContent,
+    labels: Sequence[str],
+) -> str | None:
+    """Read a textual value printed after a label or on the following line."""
+    lines = _lines(content)
+    normalized_labels = [(_normalize_label(label), label) for label in labels]
+
+    for index, line in enumerate(lines):
+        normalized_line = _normalize_label(line)
+        for normalized_label, _ in normalized_labels:
+            if normalized_line == normalized_label:
+                if index + 1 < len(lines):
+                    return lines[index + 1].strip() or None
+                continue
+
+            # Same-line forms such as "Invoice Number: INV-2180" or
+            # "Invoice No. INV-2180".
+            lowered = line.strip().lower()
+            for raw_label in labels:
+                pattern = re.compile(
+                    rf"^{re.escape(raw_label)}\s*[:.#-]?\s*(.+)$",
+                    re.IGNORECASE,
+                )
+                match = pattern.match(line.strip())
+                if match:
+                    value = match.group(1).strip()
+                    if value:
+                        return value
+
+    return None
+
+
 def extract_totals_from_text(
     content: DocumentContent,
     parse_decimal: Callable[[str | None], Decimal | None],
 ) -> dict[str, Decimal | None]:
-    lines = [
-        line.strip()
-        for fragment in _text_fragments(content)
-        for line in fragment.splitlines()
-        if line.strip()
-    ]
+    lines = _lines(content)
 
     subtotal: Decimal | None = None
     vat_rate: Decimal | None = None
@@ -82,24 +119,47 @@ def extract_totals_from_text(
                 subtotal = amount
             continue
 
-        if _VAT_PATTERN.match(normalized):
-            amount = _amount_for_labeled_line(lines, index, numbers, parse_decimal)
+        # Registration identifiers such as "VAT Number 156359683" are not money.
+        if _VAT_IDENTIFIER_PATTERN.match(normalized):
+            continue
+
+        if normalized.startswith("total vat") or normalized.startswith("total tax"):
+            amount = _tax_amount_for_labeled_line(lines, index, line, parse_decimal)
             if amount is not None:
                 vat_amount = amount
+            rate = _percentage(line, parse_decimal)
+            if rate is not None:
+                vat_rate = rate
+            continue
 
-            percent_match = re.search(r"([-+]?\d+(?:[.,]\d+)?)\s*%", line)
-            if percent_match:
-                vat_rate = parse_decimal(percent_match.group(1))
+        if _VAT_PATTERN.match(normalized):
+            amount = _tax_amount_for_labeled_line(lines, index, line, parse_decimal)
+            if amount is not None:
+                vat_amount = amount
+            rate = _percentage(line, parse_decimal)
+            if rate is not None:
+                vat_rate = rate
             continue
 
         if _TOTAL_PATTERN.match(normalized):
-            # "Total VAT" and "Total Tax" are tax summaries, not invoice totals.
-            if normalized.startswith("total vat") or normalized.startswith("total tax"):
-                continue
-
             amount = _amount_for_labeled_line(lines, index, numbers, parse_decimal)
             if amount is not None:
                 total = amount
+
+    # Some legacy proformas expose the final numeric amount beside/after the
+    # "Amount in Words" section rather than using a dedicated TOTAL label.
+    if total is None:
+        for index, line in enumerate(lines):
+            if _AMOUNT_IN_WORDS_PATTERN.match(line):
+                amount = _amount_for_labeled_line(
+                    lines,
+                    index,
+                    _numbers(line, parse_decimal),
+                    parse_decimal,
+                )
+                if amount is not None:
+                    total = amount
+                    break
 
     # Some real proformas print only line values, VAT and grand total. If net total is
     # omitted, total - VAT is a deterministic recovery of the pre-tax amount.
@@ -123,6 +183,19 @@ def _text_fragments(content: DocumentContent) -> Iterable[str]:
                 yield block.text
 
 
+def _lines(content: DocumentContent) -> list[str]:
+    return [
+        line.strip()
+        for fragment in _text_fragments(content)
+        for line in fragment.splitlines()
+        if line.strip()
+    ]
+
+
+def _normalize_label(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
 def _numbers(
     text: str,
     parse_decimal: Callable[[str | None], Decimal | None],
@@ -133,6 +206,34 @@ def _numbers(
         if value is not None:
             values.append(value)
     return values
+
+
+def _percentage(
+    text: str,
+    parse_decimal: Callable[[str | None], Decimal | None],
+) -> Decimal | None:
+    match = _PERCENT_PATTERN.search(text)
+    if not match:
+        return None
+    return parse_decimal(match.group().replace("%", "").strip())
+
+
+def _tax_amount_for_labeled_line(
+    lines: list[str],
+    index: int,
+    line: str,
+    parse_decimal: Callable[[str | None], Decimal | None],
+) -> Decimal | None:
+    # Remove the percentage before looking for the monetary value. Otherwise a line
+    # such as "TOTAL VAT 20%" would incorrectly produce 20 as the VAT amount.
+    without_percent = _PERCENT_PATTERN.sub("", line)
+    amount_numbers = _numbers(without_percent, parse_decimal)
+    return _amount_for_labeled_line(
+        lines,
+        index,
+        amount_numbers,
+        parse_decimal,
+    )
 
 
 def _amount_for_labeled_line(
