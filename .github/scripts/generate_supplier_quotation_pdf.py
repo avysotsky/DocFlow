@@ -4,11 +4,12 @@ import sys
 import pymupdf
 
 
-def draw_table(page, x_positions, y_positions, rows, font_size=7):
-    for y in y_positions:
-        page.draw_line((x_positions[0], y), (x_positions[-1], y))
-    for x in x_positions:
-        page.draw_line((x, y_positions[0]), (x, y_positions[-1]))
+def draw_table(page, x_positions, y_positions, rows, font_size=7, *, borders=True):
+    if borders:
+        for y in y_positions:
+            page.draw_line((x_positions[0], y), (x_positions[-1], y))
+        for x in x_positions:
+            page.draw_line((x, y_positions[0]), (x, y_positions[-1]))
 
     for row_index, row in enumerate(rows):
         top = y_positions[row_index]
@@ -26,7 +27,9 @@ def draw_table(page, x_positions, y_positions, rows, font_size=7):
 
 def main() -> None:
     output_path = Path(sys.argv[1] if len(sys.argv) > 1 else "supplier-quotation.pdf")
-    grand_total = sys.argv[2] if len(sys.argv) > 2 else "1748.40"
+    positional = [arg for arg in sys.argv[2:] if not arg.startswith("--")]
+    grand_total = positional[0] if positional else "1748.40"
+    borderless = "--borderless" in sys.argv[2:]
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     document = pymupdf.open()
@@ -49,6 +52,7 @@ def main() -> None:
         [90, 115, 140, 165],
         metadata_rows,
         font_size=7,
+        borders=not borderless,
     )
 
     item_rows = [
@@ -65,6 +69,7 @@ def main() -> None:
         [185, 210, 235, 260, 285, 310, 335],
         item_rows,
         font_size=6.2,
+        borders=not borderless,
     )
 
     # Keep totals vertically separated. PyMuPDF may merge horizontally aligned
