@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 from typing import Literal
 
-import fitz
+import pymupdf
 from pydantic import BaseModel, Field
 
 
@@ -22,6 +22,7 @@ class CorpusInventoryEntry(BaseModel):
 
 
 class CorpusInventory(BaseModel):
+    corpus_root: str
     documents_total: int
     unique_contents: int
     duplicates: int
@@ -43,7 +44,7 @@ def _suggested_id(relative_path: Path, digest: str) -> str:
 
 
 def _inspect_pdf(path: Path) -> tuple[int, int, SourceKind]:
-    with fitz.open(path) as document:
+    with pymupdf.open(path) as document:
         page_count = document.page_count
         native_text_pages = sum(
             1
@@ -114,6 +115,7 @@ def build_corpus_inventory(corpus_root: str | Path) -> CorpusInventory:
         )
 
     return CorpusInventory(
+        corpus_root=str(root),
         documents_total=len(documents),
         unique_contents=len(first_id_by_digest),
         duplicates=sum(document.duplicate_of is not None for document in documents),
