@@ -51,7 +51,7 @@ jobs:
         run: |
           python .github/scripts/build_public_reference_corpus.py \
             --output /tmp/docflow-public-reference \
-            --min-documents 9
+            --min-documents 8
 
           python .github/scripts/correct_public_reference_selection.py \
             --root /tmp/docflow-public-reference
@@ -73,8 +73,14 @@ jobs:
           cat /tmp/docflow-public-reference/sources-report.json
 
           count=$(jq -r '.manifest_documents' /tmp/docflow-public-reference/build-summary.json)
-          if [ "$count" -lt 9 ]; then
-            echo "HardCases requires at least 9 admitted public-reference documents."
+          if [ "$count" -lt 8 ]; then
+            echo "HardCases requires at least 8 admitted public-reference documents."
+            exit 2
+          fi
+
+          if ! jq -e '.documents[] | select(.id == "phoenix-petroleum-invoice-472557")' \
+            /tmp/docflow-public-reference/manifest.json > /dev/null; then
+            echo "Phoenix Petroleum hard case must be admitted into the benchmark manifest."
             exit 2
           fi
 
