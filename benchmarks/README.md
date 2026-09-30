@@ -14,6 +14,7 @@ benchmarks/
     ...
   results/                   # ignored; generated reports
     corpus-inventory.json
+    corpus-audit.json
     benchmark-report.json
 ```
 
@@ -32,6 +33,7 @@ python corpus_inventory.py \
 
 The inventory does **not** extract quotation/invoice business fields. It records only corpus-level technical information:
 
+- local corpus root;
 - relative PDF path;
 - stable suggested benchmark id;
 - SHA-256 digest;
@@ -65,14 +67,16 @@ Each document entry can specify:
 
 - a stable benchmark `id`;
 - PDF path relative to the manifest file;
-- optional expected `sha256` copied from the corpus inventory;
-- optional corpus metadata;
+- expected `sha256` copied from the corpus inventory;
+- corpus metadata;
 - `document_type`, normally `auto`;
 - expected document type;
 - optional expected validation status;
 - field expectations using dot paths.
 
-The optional metadata object supports:
+For a real corpus, SHA-256 is treated as required by the audit even though the underlying benchmark schema keeps it optional for synthetic/legacy cases.
+
+The metadata object supports:
 
 ```json
 {
@@ -111,7 +115,48 @@ confidence
 
 Array indexes are numeric path segments.
 
-## Step 3 — run the benchmark
+Ground truth should be recorded manually from the source document, not copied from DocFlow output. Otherwise the benchmark would be validating the extractor against itself.
+
+## Step 3 — audit inventory against manifest
+
+Run the consistency audit before measuring accuracy:
+
+```bash
+python corpus_audit.py \
+  --inventory ../../benchmarks/results/corpus-inventory.json \
+  --manifest ../../benchmarks/manifest.local.json \
+  --output ../../benchmarks/results/corpus-audit.json
+```
+
+The audit fails on structural problems such as:
+
+- manifest PDF missing from the inventory;
+- unique corpus PDF missing from the manifest;
+- missing real-corpus SHA-256;
+- SHA-256 mismatch;
+- a duplicate-content PDF being included in the manifest;
+- source-kind mismatch between inventory and manifest;
+- PDF inspection errors;
+- the same PDF path appearing multiple times in the manifest.
+
+Warnings identify benchmark-quality gaps that do not necessarily prevent a run:
+
+- duplicate content exists in the corpus directory but is excluded from the manifest;
+- `supplier`, `layout_class`, or `language` metadata is missing;
+- source kind was not copied from the inventory;
+- a document has no field-level expected values.
+
+To treat warnings as failures:
+
+```bash
+python corpus_audit.py \
+  --inventory ../../benchmarks/results/corpus-inventory.json \
+  --manifest ../../benchmarks/manifest.local.json \
+  --output ../../benchmarks/results/corpus-audit.json \
+  --fail-on-warnings
+```
+
+## Step 4 — run the benchmark
 
 From `src/DocFlow.Extraction.Worker` after installing the worker environment:
 
@@ -131,18 +176,34 @@ python benchmark.py \
 
 ## Metrics
 
-The report contains:
+The report contains overall metrics:
 
 - `document_pass_rate` — a document passes only when type, requested validation status and every expected field match;
 - `document_type_accuracy`;
 - `validation_status_accuracy`;
 - `field_accuracy`;
-- `failure_reason_counts` aggregated over the corpus;
-- per-document SHA-256 and metadata;
-- per-document OCR usage;
+- `failure_reason_counts` aggregated over the corpus.
+
+It also contains grouped metrics under `breakdowns`:
+
+```text
+breakdowns.by_supplier
+breakdowns.by_source_kind
+breakdowns.by_layout_class
+breakdowns.by_language
+```
+
+Each group contains the same document/type/validation/field/failure metrics as the overall report. This is intended to expose systematic patterns such as “digital PDFs pass but scans fail” or “one supplier layout accounts for most missing fields”.
+
+Per-document evidence includes:
+
+- SHA-256;
+- metadata;
+- confidence;
+- OCR usage/page numbers;
 - every expected/actual field comparison;
-- per-document `failure_reasons`;
-- processing errors without aborting the remaining corpus.
+- `failure_reasons`;
+- processing error text when processing could not complete.
 
 The benchmark classifies failures into these deterministic categories:
 
@@ -172,7 +233,7 @@ The CLI exits with code `0` only when all benchmark documents pass. Any failed d
 
 ## Corpus guidance
 
-For useful architectural evidence, the local corpus should contain supplier documents from several independent templates rather than many copies of one layout. Record the expected values manually from the source document before running DocFlow so the benchmark measures the extractor instead of reproducing its own output as ground truth.
+For useful architectural evidence, the local corpus should contain supplier documents from several independent templates rather than many copies of one layout.
 
 Useful dimensions to vary include:
 
