@@ -13,7 +13,9 @@ from docflow_worker.models import (
 
 
 class PdfContentExtractor:
-    """Extracts layout-aware content and optionally OCRs pages without native text."""
+    """Extracts layout-aware content and optionally OCRs image-based page content."""
+
+    _sparse_native_text_threshold = 200
 
     def __init__(
         self,
@@ -46,15 +48,19 @@ class PdfContentExtractor:
         with pymupdf.open(path) as document:
             for page_number, page in enumerate(document, start=1):
                 native_text = page.get_text("text", sort=True).strip()
+                has_images = bool(page.get_images(full=True))
                 textpage = None
                 ocr_applied = False
 
-                if self._enable_ocr and not native_text:
+                if self._enable_ocr and self._should_apply_ocr(native_text, has_images):
                     try:
+                        # Empty pages need full-page OCR. Mixed pages with a small native
+                        # caption plus an embedded scan use partial OCR so the native text
+                        # is retained while image regions are recognized.
                         textpage = page.get_textpage_ocr(
                             language=self._ocr_language,
                             dpi=self._ocr_dpi,
-                            full=True,
+                            full=not bool(native_text),
                             tessdata=self._tessdata,
                         )
                         ocr_applied = True
@@ -84,6 +90,13 @@ class PdfContentExtractor:
                 )
 
         return DocumentContent(pages=pages)
+
+    @classmethod
+    def _should_apply_ocr(cls, native_text: str, has_images: bool) -> bool:
+        if not native_text.strip():
+            return True
+
+        return has_images and len(native_text.strip()) < cls._sparse_native_text_threshold
 
     @staticmethod
     def _bbox(values: tuple[float, float, float, float] | list[float]) -> BoundingBox:
