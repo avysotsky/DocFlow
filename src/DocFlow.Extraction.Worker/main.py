@@ -5,6 +5,8 @@ from pathlib import Path
 
 from docflow_worker import LocalStorageReader, PdfContentExtractor
 from docflow_worker.engines import DeterministicSupplierQuotationEngine
+from docflow_worker.supplier_quotation_models import SupplierQuotationData
+from docflow_worker.validators import SupplierQuotationValidator
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -71,6 +73,12 @@ def main() -> None:
             )
         )
 
+        quotation = SupplierQuotationData.model_validate(structured_result.data)
+        validation = SupplierQuotationValidator().validate(quotation)
+        structured_result.validation_status = validation.status
+        structured_result.validation = validation
+        structured_result.confidence = validation.confidence
+
     if args.output_structured_json and structured_result is not None:
         output_path = Path(args.output_structured_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,6 +104,12 @@ def main() -> None:
         ),
         "structuredDocumentType": (
             structured_result.document_type if structured_result is not None else None
+        ),
+        "validationStatus": (
+            structured_result.validation_status if structured_result is not None else None
+        ),
+        "confidence": (
+            structured_result.confidence if structured_result is not None else None
         ),
         "outputStructuredJson": args.output_structured_json,
     }
