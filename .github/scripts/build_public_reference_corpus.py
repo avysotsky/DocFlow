@@ -4,6 +4,10 @@
 The script does not commit third-party PDFs. It downloads them at runtime, extracts the
 supplier-invoice page when a source is a larger public meeting/payment pack, computes
 SHA-256, and writes a benchmark manifest with independently transcribed ground truth.
+
+Page selection first uses native PDF text. If a public source pack has a broken or
+image-only text layer, Tesseract OCR is used only to locate the matching original page.
+The selected page itself is copied unchanged into the benchmark corpus.
 """
 
 from __future__ import annotations
@@ -11,7 +15,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
+import re
+import shutil
+import subprocess
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -145,21 +151,60 @@ def download_pdf(url: str, target: Path) -> None:
     target.write_bytes(data)
 
 
+def _normalize_marker_text(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.casefold()).split())
+
+
+def _page_ocr_text(page: fitz.Page) -> str:
+    if shutil.which("tesseract") is None:
+        return ""
+
+    pixmap = page.get_pixmap(
+        matrix=fitz.Matrix(1.5, 1.5),
+        colorspace=fitz.csGRAY,
+        alpha=False,
+    )
+    completed = subprocess.run(
+        ["tesseract", "stdin", "stdout", "-l", "eng", "--psm", "6"],
+        input=pixmap.tobytes("png"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=45,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.decode("utf-8", errors="replace")
+
+
 def extract_matching_page(source_pdf: Path, marker: str, target_pdf: Path) -> dict[str, Any]:
     with fitz.open(source_pdf) as source:
-        marker_lower = marker.casefold()
+        normalized_marker = _normalize_marker_text(marker)
         matching_pages = [
             index
             for index, page in enumerate(source)
-            if marker_lower in page.get_text("text").casefold()
+            if normalized_marker in _normalize_marker_text(page.get_text("text"))
         ]
+        selection_method = "native_text"
+        ocr_pages_checked = 0
+
+        if not matching_pages and source.page_count > 1 and shutil.which("tesseract"):
+            selection_method = "ocr"
+            for index, page in enumerate(source):
+                ocr_pages_checked += 1
+                ocr_text = _page_ocr_text(page)
+                if normalized_marker in _normalize_marker_text(ocr_text):
+                    matching_pages.append(index)
+                    break
 
         if not matching_pages:
             if source.page_count == 1:
                 matching_pages = [0]
+                selection_method = "single_page_fallback"
             else:
                 raise ValueError(
-                    f"Marker {marker!r} not found in {source.page_count}-page source PDF"
+                    f"Marker {marker!r} not found in {source.page_count}-page source PDF "
+                    f"after native-text/OCR search ({ocr_pages_checked} OCR pages checked)"
                 )
 
         page_index = matching_pages[0]
@@ -172,7 +217,9 @@ def extract_matching_page(source_pdf: Path, marker: str, target_pdf: Path) -> di
             "source_pages": source.page_count,
             "selected_page_index": page_index,
             "selected_page_number": page_index + 1,
-            "matching_pages": [index + 1 for index in matching_pages]
+            "matching_pages": [index + 1 for index in matching_pages],
+            "page_selection_method": selection_method,
+            "ocr_pages_checked": ocr_pages_checked,
         }
 
 
