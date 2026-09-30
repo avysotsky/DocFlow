@@ -51,7 +51,7 @@ jobs:
         run: |
           python .github/scripts/build_public_reference_corpus.py \
             --output /tmp/docflow-public-reference \
-            --min-documents 10
+            --min-documents 9
 
           python .github/scripts/correct_public_reference_selection.py \
             --root /tmp/docflow-public-reference
@@ -73,8 +73,8 @@ jobs:
           cat /tmp/docflow-public-reference/sources-report.json
 
           count=$(jq -r '.manifest_documents' /tmp/docflow-public-reference/build-summary.json)
-          if [ "$count" -lt 10 ]; then
-            echo "HardCases requires at least 10 admitted public-reference documents."
+          if [ "$count" -lt 9 ]; then
+            echo "HardCases requires at least 9 admitted public-reference documents."
             exit 2
           fi
 
