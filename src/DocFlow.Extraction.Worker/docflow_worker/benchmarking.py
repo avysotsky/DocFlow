@@ -1,6 +1,6 @@
 import hashlib
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Literal
 
@@ -142,10 +142,18 @@ class BenchmarkMetrics(BaseModel):
     failure_reason_counts: dict[str, int] = Field(default_factory=dict)
 
 
+class BenchmarkBreakdowns(BaseModel):
+    by_supplier: dict[str, BenchmarkMetrics] = Field(default_factory=dict)
+    by_source_kind: dict[str, BenchmarkMetrics] = Field(default_factory=dict)
+    by_layout_class: dict[str, BenchmarkMetrics] = Field(default_factory=dict)
+    by_language: dict[str, BenchmarkMetrics] = Field(default_factory=dict)
+
+
 class BenchmarkReport(BaseModel):
     manifest_version: int
     manifest_path: str
     metrics: BenchmarkMetrics
+    breakdowns: BenchmarkBreakdowns = Field(default_factory=BenchmarkBreakdowns)
     documents: list[BenchmarkCaseResult]
 
 
@@ -352,6 +360,7 @@ async def run_benchmark(
         manifest_version=manifest.version,
         manifest_path=str(manifest_path),
         metrics=_build_metrics(results),
+        breakdowns=_build_breakdowns(results),
         documents=results,
     )
 
@@ -413,4 +422,48 @@ def _build_metrics(results: list[BenchmarkCaseResult]) -> BenchmarkMetrics:
         fields_matched=fields_matched,
         field_accuracy=(fields_matched / len(comparisons) if comparisons else None),
         failure_reason_counts=dict(sorted(failure_reason_counts.items())),
+    )
+
+
+def _group_metrics(
+    results: list[BenchmarkCaseResult],
+    value_getter: Any,
+    *,
+    include_unknown: bool = False,
+) -> dict[str, BenchmarkMetrics]:
+    groups: dict[str, list[BenchmarkCaseResult]] = defaultdict(list)
+
+    for result in results:
+        value = value_getter(result)
+        if value is None:
+            if not include_unknown:
+                continue
+            value = "unknown"
+        groups[str(value)].append(result)
+
+    return {
+        name: _build_metrics(group_results)
+        for name, group_results in sorted(groups.items())
+    }
+
+
+def _build_breakdowns(results: list[BenchmarkCaseResult]) -> BenchmarkBreakdowns:
+    return BenchmarkBreakdowns(
+        by_supplier=_group_metrics(
+            results,
+            lambda result: result.metadata.supplier,
+        ),
+        by_source_kind=_group_metrics(
+            results,
+            lambda result: result.metadata.source_kind,
+            include_unknown=True,
+        ),
+        by_layout_class=_group_metrics(
+            results,
+            lambda result: result.metadata.layout_class,
+        ),
+        by_language=_group_metrics(
+            results,
+            lambda result: result.metadata.language,
+        ),
     )
