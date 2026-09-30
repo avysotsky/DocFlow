@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 
-from docflow_worker.models import StructuredExtractionResult
+from docflow_worker.models import DocumentContent, StructuredExtractionResult
 
 
 class StructuredExtractionEngine(ABC):
-    """Abstraction implemented later by local ONNX and external LLM engines."""
+    """Abstraction implemented by deterministic, ONNX or external LLM engines."""
 
     @property
     @abstractmethod
@@ -14,7 +14,7 @@ class StructuredExtractionEngine(ABC):
     @abstractmethod
     async def extract(
         self,
-        text: str,
+        content: DocumentContent,
         *,
         document_name: str | None = None,
     ) -> StructuredExtractionResult:
