@@ -1,5 +1,7 @@
+using System.Text.Json;
 using DocFlow.Application.Abstractions;
 using DocFlow.Domain.Entities;
+using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -51,6 +53,123 @@ public sealed class DocumentsController : ControllerBase
             return NotFound();
 
         return Ok(document);
+    }
+
+    [HttpGet("{id:guid}/extraction-result")]
+    [ProducesResponseType(typeof(GetExtractionResultResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<GetExtractionResultResponse>> GetExtractionResult(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var result = await _dbContext.ExtractionResults
+            .AsNoTracking()
+            .Where(x => x.DocumentId == id)
+            .Select(x => new
+            {
+                x.Id,
+                x.DocumentId,
+                x.StructuredDataJson,
+                x.Confidence,
+                x.ValidationStatus,
+                x.CreatedAt
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (result is null)
+            return NotFound();
+
+        var structuredData = JsonSerializer.Deserialize<JsonElement>(result.StructuredDataJson);
+
+        return Ok(new GetExtractionResultResponse(
+            result.Id,
+            result.DocumentId,
+            structuredData,
+            result.Confidence,
+            result.ValidationStatus.ToString(),
+            result.CreatedAt));
+    }
+
+    [HttpPost("{id:guid}/extraction-result")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(SaveExtractionResultResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<SaveExtractionResultResponse>> SaveExtractionResult(
+        Guid id,
+        [FromBody] JsonElement request,
+        CancellationToken cancellationToken)
+    {
+        if (request.ValueKind != JsonValueKind.Object)
+            return BadRequest("The extraction result must be a JSON object.");
+
+        if (!TryGetRequiredString(request, "engine", out _))
+            return BadRequest("The extraction result must contain a non-empty 'engine'.");
+
+        if (!TryGetRequiredString(request, "document_type", out var documentType))
+            return BadRequest("The extraction result must contain a non-empty 'document_type'.");
+
+        if (!request.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+            return BadRequest("The extraction result must contain an object-valued 'data'.");
+
+        if (!TryGetRequiredString(request, "validation_status", out var validationStatusText))
+            return BadRequest("The extraction result must contain a non-empty 'validation_status'.");
+
+        if (!TryParseValidationStatus(validationStatusText, out var validationStatus))
+            return BadRequest("'validation_status' must be 'valid', 'invalid', or 'incomplete'.");
+
+        decimal? confidence = null;
+        if (request.TryGetProperty("confidence", out var confidenceElement)
+            && confidenceElement.ValueKind != JsonValueKind.Null)
+        {
+            if (confidenceElement.ValueKind != JsonValueKind.Number
+                || !confidenceElement.TryGetDecimal(out var parsedConfidence)
+                || parsedConfidence is < 0 or > 1)
+            {
+                return BadRequest("'confidence' must be null or a number between 0 and 1.");
+            }
+
+            confidence = parsedConfidence;
+        }
+
+        var document = await _dbContext.Documents
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (document is null)
+            return NotFound();
+
+        var alreadyExists = await _dbContext.ExtractionResults
+            .AnyAsync(x => x.DocumentId == id, cancellationToken);
+
+        if (alreadyExists)
+            return Conflict("An extraction result already exists for this document.");
+
+        var extractionResult = new ExtractionResult(
+            id,
+            request.GetRawText(),
+            confidence,
+            validationStatus);
+
+        _dbContext.ExtractionResults.Add(extractionResult);
+
+        if (validationStatus == ValidationStatus.Valid)
+            document.MarkProcessed(documentType);
+        else
+            document.MarkNeedsReview(documentType);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var response = new SaveExtractionResultResponse(
+            extractionResult.Id,
+            extractionResult.DocumentId,
+            document.Status.ToString(),
+            document.DocumentType,
+            extractionResult.ValidationStatus.ToString(),
+            extractionResult.Confidence,
+            extractionResult.CreatedAt);
+
+        return StatusCode(StatusCodes.Status201Created, response);
     }
 
     [HttpPost]
@@ -126,6 +245,48 @@ public sealed class DocumentsController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, response);
     }
 
+    private static bool TryGetRequiredString(
+        JsonElement request,
+        string propertyName,
+        out string value)
+    {
+        value = string.Empty;
+
+        if (!request.TryGetProperty(propertyName, out var element)
+            || element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var text = element.GetString();
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        value = text.Trim();
+        return true;
+    }
+
+    private static bool TryParseValidationStatus(
+        string value,
+        out ValidationStatus validationStatus)
+    {
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "valid":
+                validationStatus = ValidationStatus.Valid;
+                return true;
+            case "invalid":
+                validationStatus = ValidationStatus.Invalid;
+                return true;
+            case "incomplete":
+                validationStatus = ValidationStatus.NeedsReview;
+                return true;
+            default:
+                validationStatus = default;
+                return false;
+        }
+    }
+
     private static async Task<bool> HasPdfSignatureAsync(
         IFormFile file,
         CancellationToken cancellationToken)
@@ -167,4 +328,21 @@ public sealed class DocumentsController : ControllerBase
         DateTimeOffset CreatedAt,
         DateTimeOffset? ProcessedAt,
         DateTimeOffset? DeleteAt);
+
+    public sealed record SaveExtractionResultResponse(
+        Guid Id,
+        Guid DocumentId,
+        string DocumentStatus,
+        string? DocumentType,
+        string ValidationStatus,
+        decimal? Confidence,
+        DateTimeOffset CreatedAt);
+
+    public sealed record GetExtractionResultResponse(
+        Guid Id,
+        Guid DocumentId,
+        JsonElement StructuredData,
+        decimal? Confidence,
+        string ValidationStatus,
+        DateTimeOffset CreatedAt);
 }
