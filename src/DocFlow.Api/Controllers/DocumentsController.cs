@@ -17,15 +17,18 @@ public sealed class DocumentsController : ControllerBase
     private readonly DocFlowDbContext _dbContext;
     private readonly IFileStorage _fileStorage;
     private readonly IExtractionResultService _extractionResultService;
+    private readonly IDocumentProcessingQueue _documentProcessingQueue;
 
     public DocumentsController(
         DocFlowDbContext dbContext,
         IFileStorage fileStorage,
-        IExtractionResultService extractionResultService)
+        IExtractionResultService extractionResultService,
+        IDocumentProcessingQueue documentProcessingQueue)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
         _extractionResultService = extractionResultService;
+        _documentProcessingQueue = documentProcessingQueue;
     }
 
     [HttpGet("{id:guid}")]
@@ -165,6 +168,24 @@ public sealed class DocumentsController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, response);
     }
 
+    [HttpPost("{id:guid}/process")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Process(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var exists = await _dbContext.Documents
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == id, cancellationToken);
+
+        if (!exists)
+            return NotFound();
+
+        await _documentProcessingQueue.EnqueueAsync(id, cancellationToken);
+        return Accepted();
+    }
+
     [HttpPost]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(UploadDocumentResponse), StatusCodes.Status201Created)]
@@ -228,6 +249,10 @@ public sealed class DocumentsController : ControllerBase
 
             throw;
         }
+
+        await _documentProcessingQueue.EnqueueAsync(
+            document.Id,
+            CancellationToken.None);
 
         var response = new UploadDocumentResponse(
             document.Id,
