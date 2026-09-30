@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from typing import Callable
+from typing import Callable, Iterable
 
 from docflow_worker.models import DocumentContent
 
@@ -38,7 +38,7 @@ _TOTAL_PATTERN = re.compile(r"^(?:grand\s+total|total)\b", re.IGNORECASE)
 
 
 def infer_currency(content: DocumentContent) -> str | None:
-    text = "\n".join(page.text for page in content.pages)
+    text = "\n".join(_text_fragments(content))
 
     for code in _CURRENCY_CODES:
         if re.search(rf"\b{re.escape(code)}\b", text, re.IGNORECASE):
@@ -62,8 +62,8 @@ def extract_totals_from_text(
 ) -> dict[str, Decimal | None]:
     lines = [
         line.strip()
-        for page in content.pages
-        for line in page.text.splitlines()
+        for fragment in _text_fragments(content)
+        for line in fragment.splitlines()
         if line.strip()
     ]
 
@@ -112,6 +112,15 @@ def extract_totals_from_text(
         "vat_amount": vat_amount,
         "total": total,
     }
+
+
+def _text_fragments(content: DocumentContent) -> Iterable[str]:
+    for page in content.pages:
+        if page.text:
+            yield page.text
+        for block in page.blocks:
+            if block.text:
+                yield block.text
 
 
 def _numbers(
