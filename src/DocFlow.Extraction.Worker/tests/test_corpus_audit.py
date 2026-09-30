@@ -13,7 +13,7 @@ def _write_inventory(
     inventory = CorpusInventory(
         corpus_root=str(corpus_root.resolve()),
         documents_total=len(entries),
-        unique_contents=sum(entry.duplicate_of is None for entry in entries),
+        unique_contents=len({entry.sha256 for entry in entries}),
         duplicates=sum(entry.duplicate_of is not None for entry in entries),
         errors=sum(entry.error is not None for entry in entries),
         documents=entries,
@@ -100,7 +100,7 @@ def test_audit_accepts_complete_consistent_real_corpus(tmp_path: Path) -> None:
     assert report.issues == []
 
 
-def test_audit_rejects_missing_sha_and_unrepresented_unique_pdf(tmp_path: Path) -> None:
+def test_audit_rejects_missing_sha_and_unrepresented_unique_content(tmp_path: Path) -> None:
     corpus_root = tmp_path / "corpus"
     corpus_root.mkdir()
 
@@ -143,11 +143,11 @@ def test_audit_rejects_missing_sha_and_unrepresented_unique_pdf(tmp_path: Path) 
 
     assert report.errors == 2
     assert "missing_sha256" in codes
-    assert "corpus_file_not_in_manifest" in codes
+    assert "corpus_content_not_in_manifest" in codes
     assert report.represented_unique_contents == 1
 
 
-def test_audit_rejects_duplicate_content_in_manifest(tmp_path: Path) -> None:
+def test_audit_rejects_same_content_twice_in_manifest(tmp_path: Path) -> None:
     corpus_root = tmp_path / "corpus"
     corpus_root.mkdir()
     digest = "c" * 64
@@ -197,9 +197,57 @@ def test_audit_rejects_duplicate_content_in_manifest(tmp_path: Path) -> None:
 
     assert report.errors == 1
     assert report.warnings == 1
-    assert "manifest_uses_duplicate_content" in codes
+    assert "duplicate_manifest_content" in codes
     assert "duplicate_content_present" in codes
     assert report.represented_unique_contents == 1
+
+
+def test_audit_allows_any_single_file_to_represent_duplicate_content(tmp_path: Path) -> None:
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    digest = "f" * 64
+
+    inventory_path = tmp_path / "inventory.json"
+    _write_inventory(
+        inventory_path,
+        corpus_root,
+        [
+            CorpusInventoryEntry(
+                suggested_id="doc-first",
+                file="first.pdf",
+                sha256=digest,
+                size_bytes=100,
+                source_kind="digital",
+            ),
+            CorpusInventoryEntry(
+                suggested_id="doc-second",
+                file="second.pdf",
+                sha256=digest,
+                size_bytes=100,
+                source_kind="digital",
+                duplicate_of="doc-first",
+            ),
+        ],
+    )
+
+    manifest_path = tmp_path / "manifest.json"
+    _write_manifest(
+        manifest_path,
+        [
+            _complete_case(
+                document_id="second",
+                file="corpus/second.pdf",
+                sha256=digest,
+            )
+        ],
+    )
+
+    report = audit_corpus(inventory_path, manifest_path)
+
+    assert report.errors == 0
+    assert report.warnings == 1
+    assert report.represented_unique_contents == 1
+    assert report.issues[0].code == "duplicate_content_present"
 
 
 def test_audit_reports_source_kind_mismatch_and_metadata_warnings(tmp_path: Path) -> None:
