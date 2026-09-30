@@ -190,10 +190,14 @@ jobs:
 
           invalid_document_id=$(printf '%s' "$invalid_upload_json" | jq -r '.id')
           invalid_status=$(wait_for_terminal_status "$invalid_document_id")
-          test "$invalid_status" = "NeedsReview"
+          echo "Invalid quotation final status: $invalid_status"
 
           invalid_result_json=$(curl -fsS \
             "http://127.0.0.1:5080/api/documents/$invalid_document_id/extraction-result")
+          echo "Invalid quotation persisted extraction result:"
+          printf '%s' "$invalid_result_json" | jq .
+
+          test "$invalid_status" = "NeedsReview"
           printf '%s' "$invalid_result_json" | jq -e '
             .validationStatus == "Invalid"
             and .structuredData.validation_status == "invalid"
