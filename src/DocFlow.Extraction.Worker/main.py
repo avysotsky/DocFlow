@@ -54,6 +54,26 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--disable-ocr",
+        action="store_true",
+        help="Do not OCR pages that contain no extractable native text.",
+    )
+    parser.add_argument(
+        "--ocr-language",
+        default="eng",
+        help="Tesseract language code(s), for example 'eng' or 'eng+ukr'.",
+    )
+    parser.add_argument(
+        "--ocr-dpi",
+        type=int,
+        default=300,
+        help="Resolution used by OCR for pages without native text. Default: 300.",
+    )
+    parser.add_argument(
+        "--tessdata",
+        help="Optional explicit path to the Tesseract tessdata directory.",
+    )
+    parser.add_argument(
         "--output-structured-json",
         help=(
             "Optional path where StructuredExtractionResult JSON will be written. "
@@ -81,7 +101,12 @@ def main() -> None:
 
     storage = LocalStorageReader(args.storage_root)
     pdf_path = storage.resolve(args.storage_key)
-    content = PdfContentExtractor().extract(pdf_path)
+    content = PdfContentExtractor(
+        enable_ocr=not args.disable_ocr,
+        ocr_language=args.ocr_language,
+        ocr_dpi=args.ocr_dpi,
+        tessdata=args.tessdata,
+    ).extract(pdf_path)
 
     output_text_path = None
     if args.output_text:
@@ -142,6 +167,8 @@ def main() -> None:
         "pagesWithText": content.pages_with_text,
         "emptyPageNumbers": content.empty_page_numbers,
         "needsOcr": content.needs_ocr,
+        "ocrApplied": content.ocr_applied,
+        "ocrPageNumbers": content.ocr_page_numbers,
         "textLength": len(content.text),
         "wordCount": sum(len(page.words) for page in content.pages),
         "blockCount": sum(len(page.blocks) for page in content.pages),
