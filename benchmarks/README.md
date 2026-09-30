@@ -77,11 +77,51 @@ The report contains:
 - `document_type_accuracy`;
 - `validation_status_accuracy`;
 - `field_accuracy`;
+- `failure_reason_counts` aggregated over the corpus;
 - per-document OCR usage;
 - every expected/actual field comparison;
+- per-document `failure_reasons`;
 - processing errors without aborting the remaining corpus.
 
+The benchmark classifies failures into these deterministic categories:
+
+```text
+processing_error
+  the document could not be processed at all
+
+document_type_mismatch
+  detected document type differs from the manifest expectation
+
+validation_status_mismatch
+  deterministic validation result differs from the manifest expectation
+
+missing_field
+  an expected field path is absent from the structured result
+
+field_mismatch
+  an expected field exists but contains a different value
+```
+
+One document can have several failure reasons at the same time. A processing error is terminal for that document and is reported only as `processing_error` because no structured result exists to compare.
+
 The CLI exits with code `0` only when all benchmark documents pass. Any failed document produces exit code `1` while still writing the complete report.
+
+## Corpus guidance
+
+For useful architectural evidence, the local corpus should contain supplier documents from several independent templates rather than many copies of one layout. Record the expected values manually from the source document before running DocFlow so the benchmark measures the extractor instead of reproducing its own output as ground truth.
+
+Useful dimensions to vary include:
+
+- quotation vs invoice;
+- digital text vs scan/OCR;
+- bordered vs borderless item tables;
+- single-page vs multi-page documents;
+- supplier template/layout;
+- date and numeric formats;
+- tax/VAT presentation;
+- optional fields such as PO number, Incoterms and payment terms.
+
+Do not commit confidential supplier PDFs, expected business values or generated reports. Keep them under the ignored local corpus/manifest/results paths.
 
 ## Purpose
 
