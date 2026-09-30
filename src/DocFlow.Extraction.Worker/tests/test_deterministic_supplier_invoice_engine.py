@@ -111,3 +111,68 @@ def test_extracts_and_validates_supplier_invoice() -> None:
     assert invoice.total == Decimal("672.00")
     assert validation.status == "valid"
     assert validation.confidence == 1.0
+
+
+def test_extracts_split_tzs_totals_from_public_proforma_text() -> None:
+    content = DocumentContent(
+        pages=[
+            PageContent(
+                page_number=1,
+                width=595,
+                height=842,
+                text=(
+                    "PROFORMA INVOICE\n"
+                    "Unit Price(TZS)\n"
+                    "Total(TZS)\n"
+                    "SUB TOTAL(TZS)\n"
+                    "60,762.71\n"
+                    "VAT(TZS)\n"
+                    "10,937.29\n"
+                    "GRAND TOTAL(TZS)\n"
+                    "71,700.00\n"
+                ),
+                words=[],
+                blocks=[],
+                tables=[],
+            )
+        ]
+    )
+
+    result = asyncio.run(DeterministicSupplierInvoiceEngine().extract(content))
+    invoice = SupplierInvoiceData.model_validate(result.data)
+
+    assert invoice.currency == "TZS"
+    assert invoice.subtotal == Decimal("60762.71")
+    assert invoice.vat_amount == Decimal("10937.29")
+    assert invoice.total == Decimal("71700.00")
+
+
+def test_extracts_symbol_currency_and_derives_missing_subtotal() -> None:
+    content = DocumentContent(
+        pages=[
+            PageContent(
+                page_number=1,
+                width=595,
+                height=842,
+                text=(
+                    "PROFORMA INVOICE TO:\n"
+                    "COST OF VEHICLE £35,000.00\n"
+                    "SCW SIDE STEP £ 2,000.00\n"
+                    "VAT @ 20% £ 7,400.00\n"
+                    "TOTAL £44,400.00\n"
+                ),
+                words=[],
+                blocks=[],
+                tables=[],
+            )
+        ]
+    )
+
+    result = asyncio.run(DeterministicSupplierInvoiceEngine().extract(content))
+    invoice = SupplierInvoiceData.model_validate(result.data)
+
+    assert invoice.currency == "GBP"
+    assert invoice.subtotal == Decimal("37000.00")
+    assert invoice.vat_rate == Decimal("20")
+    assert invoice.vat_amount == Decimal("7400.00")
+    assert invoice.total == Decimal("44400.00")
