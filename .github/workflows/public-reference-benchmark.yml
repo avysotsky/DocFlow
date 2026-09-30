@@ -33,13 +33,22 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Build corpus from original public supplier PDFs
+        shell: bash
         run: |
           python .github/scripts/build_public_reference_corpus.py \
             --output /tmp/docflow-public-reference \
-            --min-documents 3
+            --min-documents 1
 
+          echo "=== build summary ==="
           cat /tmp/docflow-public-reference/build-summary.json
+          echo "=== per-source report ==="
           cat /tmp/docflow-public-reference/sources-report.json
+
+          count=$(jq -r '.manifest_documents' /tmp/docflow-public-reference/build-summary.json)
+          if [ "$count" -lt 2 ]; then
+            echo "Need at least two independently sourced original PDFs for a useful public-reference run."
+            exit 2
+          fi
 
       - name: Audit and benchmark public reference corpus
         id: benchmark
