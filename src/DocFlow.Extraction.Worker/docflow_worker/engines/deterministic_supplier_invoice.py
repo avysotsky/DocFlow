@@ -12,7 +12,12 @@ from docflow_worker.invoice_text_fallbacks import (
     extract_preferred_invoice_total,
     infer_labeled_currency,
 )
-from docflow_worker.models import DocumentContent, StructuredExtractionResult
+from docflow_worker.models import (
+    BoundingBox,
+    DocumentContent,
+    StructuredExtractionResult,
+    TableContent,
+)
 from docflow_worker.supplier_invoice_models import (
     SupplierInvoiceData,
     SupplierInvoiceItem,
@@ -33,8 +38,8 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
         document_name: str | None = None,
     ) -> StructuredExtractionResult:
         metadata = self._extract_invoice_metadata(content)
-        item_table = self._find_item_table(content)
-        quotation_items = self._extract_items(item_table) if item_table else []
+        item_table = self._find_invoice_item_table(content)
+        invoice_items = self._extract_invoice_items(item_table) if item_table else []
 
         invoice_number = (
             extract_labeled_identifier(
@@ -76,17 +81,7 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
                 "purchase order number",
             ),
             payment_terms=self._metadata_value(metadata, "payment terms"),
-            items=[
-                SupplierInvoiceItem(
-                    sku=item.sku,
-                    description=item.description,
-                    quantity=item.quantity,
-                    unit=item.unit,
-                    unit_price=item.unit_price,
-                    line_total=item.line_total,
-                )
-                for item in quotation_items
-            ],
+            items=invoice_items,
         )
 
         self._extract_invoice_totals_and_terms(content, invoice)
@@ -97,6 +92,138 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
             data=invoice.model_dump(),
             confidence=None,
         )
+
+    @classmethod
+    def _find_invoice_item_table(cls, content: DocumentContent) -> TableContent | None:
+        for page in content.pages:
+            for table in page.tables:
+                if cls._looks_like_invoice_item_table(table.rows):
+                    return table
+
+        # Supplier invoices frequently omit SKU/item-code columns. Reconstruct a
+        # borderless invoice table from layout-preserved text and accept the common
+        # Description + Quantity + Unit Price + Amount shape.
+        for page in content.pages:
+            rows = cls._layout_rows(page.text)
+            for index, row in enumerate(rows):
+                if not cls._looks_like_invoice_item_table([row]):
+                    continue
+
+                item_rows: list[list[str | None]] = [row]
+                for candidate in rows[index + 1 :]:
+                    if cls._is_item_table_terminator(candidate):
+                        break
+                    item_rows.append(candidate)
+
+                if len(item_rows) > 1:
+                    return TableContent(
+                        bbox=BoundingBox(
+                            x0=0,
+                            y0=0,
+                            x1=page.width,
+                            y1=page.height,
+                        ),
+                        rows=item_rows,
+                    )
+
+        return None
+
+    @classmethod
+    def _looks_like_invoice_item_table(cls, rows: list[list[str | None]]) -> bool:
+        if not rows:
+            return False
+
+        headers = [cls._normalize_header(cell) for cell in rows[0]]
+        return (
+            cls._find_header_index(
+                headers,
+                "description",
+                "item description",
+                "product description",
+                "item",
+            )
+            is not None
+            and cls._find_header_index(headers, "qty", "quantity") is not None
+            and cls._find_header_prefix(headers, "unit price", "price") is not None
+            and cls._find_header_prefix(
+                headers,
+                "line total",
+                "total price",
+                "amount",
+            )
+            is not None
+        )
+
+    @classmethod
+    def _extract_invoice_items(cls, table: TableContent) -> list[SupplierInvoiceItem]:
+        if not table.rows:
+            return []
+
+        headers = [cls._normalize_header(cell) for cell in table.rows[0]]
+        sku_index = cls._find_header_index(
+            headers,
+            "sku",
+            "item code",
+            "product code",
+            "part number",
+            "part no",
+        )
+        description_index = cls._find_header_index(
+            headers,
+            "description",
+            "item description",
+            "product description",
+            "item",
+        )
+        quantity_index = cls._find_header_index(headers, "qty", "quantity")
+        unit_index = cls._find_header_index(headers, "unit", "uom")
+        unit_price_index = cls._find_header_prefix(headers, "unit price", "price")
+        line_total_index = cls._find_header_prefix(
+            headers,
+            "line total",
+            "total price",
+            "amount",
+        )
+
+        if description_index is None or quantity_index is None:
+            return []
+
+        items: list[SupplierInvoiceItem] = []
+
+        for row in table.rows[1:]:
+            description = cls._row_value(row, description_index)
+            quantity = cls._parse_decimal(cls._row_value(row, quantity_index))
+            if not description or quantity is None:
+                continue
+
+            items.append(
+                SupplierInvoiceItem(
+                    sku=(
+                        cls._row_value(row, sku_index)
+                        if sku_index is not None
+                        else None
+                    ),
+                    description=description,
+                    quantity=quantity,
+                    unit=(
+                        cls._row_value(row, unit_index)
+                        if unit_index is not None
+                        else None
+                    ),
+                    unit_price=(
+                        cls._parse_decimal(cls._row_value(row, unit_price_index))
+                        if unit_price_index is not None
+                        else None
+                    ),
+                    line_total=(
+                        cls._parse_decimal(cls._row_value(row, line_total_index))
+                        if line_total_index is not None
+                        else None
+                    ),
+                )
+            )
+
+        return items
 
     @classmethod
     def _extract_invoice_metadata(cls, content: DocumentContent) -> dict[str, str]:
