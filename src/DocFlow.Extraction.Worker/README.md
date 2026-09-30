@@ -8,21 +8,38 @@ The worker can now:
 
 1. resolve a PDF by the same local `StorageKey` that the .NET API stores in PostgreSQL;
 2. prevent storage-key path traversal;
-3. extract the embedded text layer with PyMuPDF;
-4. report page count, pages containing text, empty pages and whether OCR is required;
-5. optionally save extracted text as UTF-8.
+3. inspect digital PDFs with PyMuPDF;
+4. extract page text, text blocks and individual words with bounding-box coordinates;
+5. detect line-based tables and extract their rows/cells;
+6. report page count, pages containing text, empty pages and whether OCR is required;
+7. optionally save both plain UTF-8 text and the full layout-aware `DocumentContent` JSON.
 
-OCR itself is the next step. At this stage `needsOcr=true` means that the PDF has pages but none contains extractable embedded text.
+OCR itself is a later stage. At this stage `needsOcr=true` means that the PDF has pages but none contains extractable embedded text.
+
+## DocumentContent
+
+`DocumentContent` is the provider-neutral representation passed to semantic extraction engines. It preserves information that a plain string would lose:
+
+- page number and dimensions;
+- page text;
+- text blocks and their bounding boxes;
+- words and their bounding boxes plus block/line/word indexes;
+- detected tables, their bounding boxes and cell values.
+
+Plain text is still available as a computed convenience field, but it is no longer the primary representation of a document.
 
 ## Provider-agnostic structured extraction
 
-`docflow_worker.engines.StructuredExtractionEngine` is the boundary for the later structured extraction stage. The pipeline will be able to plug in implementations such as:
+`docflow_worker.engines.StructuredExtractionEngine` accepts `DocumentContent` and returns `StructuredExtractionResult`.
 
+The pipeline can later plug in implementations such as:
+
+- deterministic supplier/document parsers;
 - `OnnxExtractionEngine` for a local model;
 - `LlmExtractionEngine` for an external LLM API;
-- a hybrid engine that tries local extraction first and falls back to an LLM when confidence is insufficient.
+- a hybrid router that tries deterministic/local extraction first and falls back to an LLM when confidence is insufficient.
 
-The rest of DocFlow should depend on the abstraction and on `StructuredExtractionResult`, not on a specific AI provider.
+The rest of DocFlow should depend on these abstractions rather than on a specific AI provider.
 
 ## Local development
 
@@ -42,7 +59,8 @@ Take a `StorageKey` from the `Documents` table and run, for example:
 python main.py `
   --storage-root ..\DocFlow.Api\storage `
   --storage-key "2026/09/<stored-file>.pdf" `
-  --output-text extracted.txt
+  --output-text extracted.txt `
+  --output-json extracted-layout.json
 ```
 
 The command prints a JSON summary such as:
@@ -55,6 +73,10 @@ The command prints a JSON summary such as:
   "emptyPageNumbers": [],
   "needsOcr": false,
   "textLength": 4281,
-  "outputText": "extracted.txt"
+  "wordCount": 642,
+  "blockCount": 51,
+  "tableCount": 2,
+  "outputText": "extracted.txt",
+  "outputJson": "extracted-layout.json"
 }
 ```
