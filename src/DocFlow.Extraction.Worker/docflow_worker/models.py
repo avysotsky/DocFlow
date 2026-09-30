@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -90,10 +90,24 @@ class DocumentContent(BaseModel):
         return sum(len(page.tables) for page in self.pages)
 
 
+class ValidationCheckResult(BaseModel):
+    status: Literal["passed", "failed", "skipped"]
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class StructuredValidationResult(BaseModel):
+    status: Literal["valid", "invalid", "incomplete"]
+    checks: dict[str, ValidationCheckResult]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class StructuredExtractionResult(BaseModel):
-    """Provider-neutral result returned by a future ONNX or LLM extraction engine."""
+    """Provider-neutral semantic extraction result with optional deterministic validation."""
 
     engine: str
     document_type: str | None = None
     data: dict[str, Any]
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    validation_status: Literal["valid", "invalid", "incomplete"] | None = None
+    validation: StructuredValidationResult | None = None
