@@ -62,7 +62,14 @@ public sealed class Document
         ProcessedAt = DateTimeOffset.UtcNow;
     }
 
-    public void MarkNeedsReview() => Status = DocumentStatus.NeedsReview;
+    public void MarkNeedsReview(string? documentType = null)
+    {
+        if (!string.IsNullOrWhiteSpace(documentType))
+            DocumentType = documentType.Trim();
+
+        Status = DocumentStatus.NeedsReview;
+        ProcessedAt = DateTimeOffset.UtcNow;
+    }
 
     public void MarkFailed() => Status = DocumentStatus.Failed;
 }
