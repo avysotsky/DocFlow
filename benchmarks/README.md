@@ -131,17 +131,19 @@ python corpus_audit.py \
 The audit fails on structural problems such as:
 
 - manifest PDF missing from the inventory;
-- unique corpus PDF missing from the manifest;
+- unique corpus **content** (unique SHA-256) missing from the manifest;
 - missing real-corpus SHA-256;
 - SHA-256 mismatch;
-- a duplicate-content PDF being included in the manifest;
+- the same PDF content/SHA-256 being represented more than once in the manifest;
 - source-kind mismatch between inventory and manifest;
 - PDF inspection errors;
 - the same PDF path appearing multiple times in the manifest.
 
+Duplicate copies are handled by **content**, not by whichever filename happened to be scanned first. If several files have the same SHA-256, any one of them may represent that content in the manifest. The remaining copies produce only a `duplicate_content_present` warning. The audit errors only when the same content SHA is benchmarked more than once.
+
 Warnings identify benchmark-quality gaps that do not necessarily prevent a run:
 
-- duplicate content exists in the corpus directory but is excluded from the manifest;
+- duplicate copies exist in the corpus directory while one representative of that SHA is present in the manifest;
 - `supplier`, `layout_class`, or `language` metadata is missing;
 - source kind was not copied from the inventory;
 - a document has no field-level expected values.
