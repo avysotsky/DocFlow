@@ -193,38 +193,91 @@ validation:        valid
 OCR applied:       yes
 ```
 
-## 8. Current measured public-reference baseline
+### 7.3 Cargo International invoice G59771 — German locale + decimal comma + negative values
 
-After the Town House and Phoenix fixes, Public Reference Benchmark run #63 on implementation head `ef75677056cab61e959cc13a8abfb5168c08b008` produced:
+This real German invoice expanded the corpus beyond English-only labels and positive Anglo-style money formatting.
+
+Measured initial failure:
 
 ```text
-documents_total: 9
-documents_passed: 9
-documents_failed: 0
-document_type_correct: 9/9
-validation_status_correct: 9/9
-fields_checked: 43
-fields_matched: 43
-field_accuracy: 1.0
-audit_errors: 0
-audit_warnings: 0
+processing_error
+ValueError: The document type could not be detected deterministically.
 ```
 
-The source pack remains externally hosted and therefore some unrelated source URLs can transiently fail. The benchmark gate requires the active hard case while retaining a minimum viable public corpus so third-party outages do not masquerade as extraction regressions.
+The PDF itself was digital and readable. The failure was therefore a locale/document-type issue rather than OCR.
+
+Independent ground truth:
+
+```text
+Rechnungsnummer: G59771
+Rechnungsdatum:  04.06.2024
+currency:         EUR
+Netto:            -96,48
+MwSt.:            -18,33
+MwSt. in %:       19,00
+Brutto:           -114,81
+expected status:  incomplete
+```
+
+`incomplete` is intentional: the real document exposes the invoice totals clearly but does not provide a line structure that allows all current item/subtotal validation checks to be completed.
+
+Generic fixes:
+
+- deterministic document-type detection now recognizes a constrained German invoice vocabulary (`Rechnung`, `Rechnungsnummer`, `Rechnungsdatum`, `Rechnungsbetrag`, `Zahlungsziel`);
+- invoice engine v2 has German field fallbacks for invoice number, invoice date and due date;
+- German `Gesamt: Netto / MwSt. / MwSt. in % / Brutto` summaries are parsed deterministically;
+- locale-aware decimal parsing handles negative decimal-comma values and European grouping, including `1.234,56 -> 1234.56`;
+- the German path activates only when German invoice vocabulary is present, leaving unrelated English documents on the existing behavior;
+- regression tests exercise the full structured pipeline and locale numeric conversion.
+
+Public Reference Benchmark run #65 verified the real document:
+
+```text
+actual document type:      supplier_invoice
+actual validation status:  incomplete
+invoice number:             G59771
+invoice date:               2024-06-04
+currency:                   EUR
+subtotal:                   -96.48
+VAT rate:                   19.00
+VAT amount:                 -18.33
+total:                      -114.81
+OCR applied:                false
+```
+
+All seven checked Cargo business fields matched independent ground truth.
+
+## 8. Current measured public-reference baseline
+
+After Town House, Phoenix and Cargo fixes, Public Reference Benchmark run #65 on implementation head `694dbcb51d6d79eda187694694c4e37f0e3162c8` produced:
+
+```text
+documents_total: 10
+documents_passed: 10
+documents_failed: 0
+document_type_correct: 10/10
+validation_status_correct: 10/10
+fields_checked: 50
+fields_matched: 50
+field_accuracy: 1.0
+failure_reason_counts: {}
+```
+
+The source pack remains externally hosted and therefore some unrelated source URLs can transiently fail. The benchmark gate requires the active hard cases while retaining a minimum viable public corpus so third-party outages do not masquerade as extraction regressions.
 
 This is engineering regression evidence over a small curated corpus, **not** a production accuracy percentage.
 
 ## 9. Current CI state
 
-Current hard-case implementation has been verified through:
+Current hard-case implementation head `694dbcb51d6d79eda187694694c4e37f0e3162c8` has been verified through:
 
-- Python Worker CI — green;
-- Benchmark Smoke — green;
-- Scanned OCR E2E — green;
-- Public Reference Benchmark — green, including Phoenix;
-- Automation E2E — green after updating its expected invoice engine contract to `deterministic_supplier_invoice_v2`.
+- Python Worker CI #107 — green;
+- Benchmark Smoke #68 — green;
+- Automation E2E #92 — green;
+- Scanned OCR E2E #69 — green;
+- Public Reference Benchmark #65 — green, including Cargo, Phoenix and Town House.
 
-Automation E2E run #91 verifies that the engine-version update did not break the .NET upload → worker → persistence path.
+The .NET upload → worker → persistence path remains green with supplier invoice engine `deterministic_supplier_invoice_v2`.
 
 ## 10. ML/LLM decision rule
 
@@ -245,13 +298,15 @@ If such a failure class appears, first create an isolated benchmark experiment. 
 
 ## 11. Remaining coverage gaps
 
-The current public-reference corpus is still predominantly English. Version 1.1.1.6 remains active because the following intended coverage is not yet demonstrated:
+Version 1.1.1.6 remains active because the following intended coverage is not yet demonstrated strongly enough:
 
-- decimal-comma / European numeric formats;
-- non-English or bilingual invoice labels;
 - at least one genuine multi-page item-table case;
+- repeated table headers across pages / totals on a later page;
 - multiple VAT/tax-rate summaries;
+- a second locale/language family beyond English and German;
 - broader OCR degradation beyond the current scans and mixed-page example.
+
+Decimal-comma, negative money, German invoice labels and German day-month-year dates are now represented by the real Cargo International document.
 
 ## 12. Engineering target
 
@@ -285,21 +340,23 @@ Version 1.1.1.6 can close when:
 
 ## 14. Immediate next stage
 
-Target a document that expands **different** difficulty classes rather than another discount variant.
+The next admitted hard case should expand **layout continuity across pages**, not another single-page locale variant.
 
-Preferred next admission combines as many of these as possible:
+Preferred characteristics:
 
 ```text
-German/European invoice
-+ decimal comma / thousands separators
-+ non-US date format
-+ non-English labels
-+ multi-page item layout if available
-+ multiple VAT/tax summaries if present
+real public supplier invoice
++ 2+ pages belonging to the same invoice
++ item table continuing onto later page(s)
++ repeated or missing table header on continuation pages
++ totals appearing on final page
++ independent ground truth for identifying fields and totals
 ```
 
-The next batch should remain small enough that any failure can still be attributed to a concrete root cause, but related extraction/test changes should be committed as one logical engineering unit rather than many microcommits.
+If a real public multi-page supplier invoice cannot be obtained reliably, use a clearly labeled controlled multi-page fixture only as a secondary engineering test; it must not be counted as new real-world evidence.
+
+Related extraction/test changes should continue to be committed as one logical engineering unit rather than many microcommits.
 
 ---
 
-Current status: **1.1.1.6 HardCases ACTIVE; Town House and Phoenix hard-case classes are closed, current real public regression baseline is 9/9 green, next focus is locale + multi-page coverage.**
+Current status: **1.1.1.6 HardCases ACTIVE; Town House, Phoenix and Cargo hard-case classes are closed, current real public regression baseline is 10/10 green, next focus is genuine multi-page item-table coverage.**
