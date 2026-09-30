@@ -57,8 +57,8 @@ jobs:
             and .duplicates == 1
             and .errors == 0
             and ([.documents[].source_kind] | all(. == "digital"))
-            and ([.documents[] | select(.file == "quotation-duplicate.pdf") | .duplicate_of] | length) == 1
-            and ([.documents[] | select(.file == "quotation-duplicate.pdf") | .duplicate_of != null] | all)
+            and ([.documents[] | select(.duplicate_of != null)] | length) == 1
+            and ([.documents[] | select(.duplicate_of == null)] | length) == 2
           ' /tmp/docflow-benchmark/corpus-inventory.json >/dev/null
 
       - name: Create benchmark manifest from inventory
