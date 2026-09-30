@@ -51,7 +51,7 @@ jobs:
         run: |
           python .github/scripts/build_public_reference_corpus.py \
             --output /tmp/docflow-public-reference \
-            --min-documents 1
+            --min-documents 10
 
           python .github/scripts/correct_public_reference_selection.py \
             --root /tmp/docflow-public-reference
@@ -73,8 +73,8 @@ jobs:
           cat /tmp/docflow-public-reference/sources-report.json
 
           count=$(jq -r '.manifest_documents' /tmp/docflow-public-reference/build-summary.json)
-          if [ "$count" -lt 2 ]; then
-            echo "Need at least two independently sourced original PDFs for a useful public-reference run."
+          if [ "$count" -lt 10 ]; then
+            echo "HardCases requires at least 10 admitted public-reference documents."
             exit 2
           fi
 
