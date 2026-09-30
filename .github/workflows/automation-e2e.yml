@@ -124,27 +124,32 @@ jobs:
             document_json=$(curl -fsS "http://127.0.0.1:5080/api/documents/$document_id")
             final_status=$(printf '%s' "$document_json" | jq -r '.status')
 
-            if [ "$final_status" = "Processed" ]; then
-              break
-            fi
-
-            if [ "$final_status" = "Failed" ]; then
-              cat /tmp/docflow-api.log
-              echo "Document processing failed."
-              exit 1
-            fi
+            case "$final_status" in
+              Processed|NeedsReview|Failed)
+                break
+                ;;
+            esac
 
             sleep 1
           done
 
-          if [ "$final_status" != "Processed" ]; then
+          if [ "$final_status" = "Failed" ]; then
             cat /tmp/docflow-api.log
-            echo "Expected Processed but got '$final_status'."
+            echo "Document processing failed."
             exit 1
           fi
 
           result_json=$(curl -fsS \
             "http://127.0.0.1:5080/api/documents/$document_id/extraction-result")
+
+          echo "Final document status: $final_status"
+          echo "Persisted extraction result:"
+          printf '%s' "$result_json" | jq .
+
+          if [ "$final_status" != "Processed" ]; then
+            echo "Expected Processed but got '$final_status'."
+            exit 1
+          fi
 
           printf '%s' "$result_json" | jq -e '
             .validationStatus == "Valid"
