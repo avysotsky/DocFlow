@@ -2,6 +2,90 @@
 
 All notable changes to DocFlow are documented in this file.
 
+## [1.1.1.4] - 2026-09-30
+
+Benchmark-infrastructure milestone for measuring the deterministic + OCR supplier-document pipeline against a private local corpus.
+
+### Added
+
+- Private/local benchmark corpus convention under `benchmarks/`.
+- Tracked `benchmarks/manifest.example.json` and benchmark instructions.
+- Ignored local benchmark inputs/results:
+  - `benchmarks/manifest.local.json`
+  - `benchmarks/corpus/`
+  - `benchmarks/results/`
+- Reusable `docflow_worker.benchmarking` module.
+- `benchmark.py` CLI for running a manifest over quotation/invoice PDFs.
+- Shared structured extraction pipeline reused by the normal worker and the benchmark path.
+- Expected-field comparison using dot paths with numeric array indexes.
+- JSON benchmark report with:
+  - document pass rate
+  - document-type accuracy
+  - validation-status accuracy
+  - field accuracy
+  - per-document confidence
+  - OCR usage/page numbers
+  - expected/actual field comparisons
+  - processing errors
+- Explicit benchmark failure classification:
+  - `processing_error`
+  - `document_type_mismatch`
+  - `validation_status_mismatch`
+  - `missing_field`
+  - `field_mismatch`
+- Aggregated `failure_reason_counts` in benchmark metrics.
+- Unit tests for manifest validation, nested comparisons, metrics and failure classification.
+- Dedicated `Benchmark Smoke` GitHub Actions workflow.
+
+### Verified
+
+The benchmark smoke workflow runs the real benchmark CLI in a clean Python 3.11 environment over generated supplier quotation and invoice PDFs.
+
+Verified result:
+
+```text
+documents_total: 2
+documents_passed: 2
+documents_failed: 0
+document_pass_rate: 1.0
+document_type_accuracy: 1.0
+validation_status_accuracy: 1.0
+fields_checked: 14
+fields_matched: 14
+field_accuracy: 1.0
+failure_reason_counts: {}
+```
+
+`Python Worker CI` also passes with the benchmark CLI compiled and the benchmark unit tests included.
+
+### Architectural decisions
+
+- Benchmarking executes the same deterministic/OCR structured extraction pipeline as the worker instead of a test-only parser.
+- Real supplier PDFs, expected values and generated reports remain local/private and are not committed to Git.
+- One failing document does not abort the remaining corpus run.
+- Synthetic smoke results are treated only as benchmark-harness verification, not as production accuracy evidence.
+- ONNX/LLM fallback remains deferred until a representative real corpus shows concrete failure classes.
+
+### Known limitation
+
+No representative private real-world supplier corpus has been evaluated yet. Therefore real document pass rate, field accuracy, OCR reliability and failure distribution are still unknown.
+
+### Development handoff
+
+Completed-state handoff:
+
+```text
+docs/HANDOFF_v1.1.1.4_COMPLETED.md
+```
+
+The next working branch is:
+
+```text
+DocFlow/v_1.1.1.5_RealCorpus
+```
+
+Its purpose is to run the benchmark infrastructure against representative private supplier documents and use measured failure categories to decide the next extraction architecture.
+
 ## [1.1.1.3] - 2026-09-30
 
 Controlled robustness milestone for supplier documents.
