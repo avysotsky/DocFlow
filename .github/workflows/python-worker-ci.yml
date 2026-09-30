@@ -2,7 +2,9 @@ name: Python Worker CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - DocFlow/v_1.1.1.2_Automation
     paths:
       - 'src/DocFlow.Extraction.Worker/**'
       - '.github/workflows/python-worker-ci.yml'
@@ -11,6 +13,7 @@ on:
     paths:
       - 'src/DocFlow.Extraction.Worker/**'
       - '.github/workflows/python-worker-ci.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
