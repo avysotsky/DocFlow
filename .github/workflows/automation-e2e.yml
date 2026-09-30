@@ -286,7 +286,7 @@ jobs:
           printf '%s' "$invoice_result_json" | jq -e '
             .validationStatus == "Valid"
             and .confidence == 1
-            and .structuredData.engine == "deterministic_supplier_invoice_v1"
+            and .structuredData.engine == "deterministic_supplier_invoice_v2"
             and .structuredData.document_type == "supplier_invoice"
             and .structuredData.validation_status == "valid"
             and .structuredData.data.invoice_number == "INV-2026-091"
