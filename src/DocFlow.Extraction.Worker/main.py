@@ -4,9 +4,14 @@ import json
 from pathlib import Path
 
 from docflow_worker import LocalStorageReader, PdfContentExtractor
-from docflow_worker.engines import DeterministicSupplierQuotationEngine
+from docflow_worker.document_type_detector import detect_document_type
+from docflow_worker.engines import (
+    DeterministicSupplierInvoiceEngine,
+    DeterministicSupplierQuotationEngine,
+)
+from docflow_worker.supplier_invoice_models import SupplierInvoiceData
 from docflow_worker.supplier_quotation_models import SupplierQuotationData
-from docflow_worker.validators import SupplierQuotationValidator
+from docflow_worker.validators import SupplierInvoiceValidator, SupplierQuotationValidator
 
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
@@ -42,8 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--document-type",
-        choices=["supplier_quotation"],
-        help="Run the currently available deterministic semantic extractor.",
+        choices=["auto", "supplier_quotation", "supplier_invoice"],
+        help=(
+            "Run deterministic semantic extraction for a supported document type, "
+            "or detect quotation vs invoice with 'auto'."
+        ),
     )
     parser.add_argument(
         "--output-structured-json",
@@ -88,7 +96,11 @@ def main() -> None:
         output_json_path.write_text(content.model_dump_json(indent=2), encoding="utf-8")
 
     structured_result = None
-    if args.document_type == "supplier_quotation":
+    resolved_document_type = args.document_type
+    if resolved_document_type == "auto":
+        resolved_document_type = detect_document_type(content)
+
+    if resolved_document_type == "supplier_quotation":
         structured_result = asyncio.run(
             DeterministicSupplierQuotationEngine().extract(
                 content,
@@ -98,6 +110,19 @@ def main() -> None:
 
         quotation = SupplierQuotationData.model_validate(structured_result.data)
         validation = SupplierQuotationValidator().validate(quotation)
+        structured_result.validation_status = validation.status
+        structured_result.validation = validation
+        structured_result.confidence = validation.confidence
+    elif resolved_document_type == "supplier_invoice":
+        structured_result = asyncio.run(
+            DeterministicSupplierInvoiceEngine().extract(
+                content,
+                document_name=args.storage_key,
+            )
+        )
+
+        invoice = SupplierInvoiceData.model_validate(structured_result.data)
+        validation = SupplierInvoiceValidator().validate(invoice)
         structured_result.validation_status = validation.status
         structured_result.validation = validation
         structured_result.confidence = validation.confidence
@@ -123,6 +148,8 @@ def main() -> None:
         "tableCount": content.table_count,
         "outputText": str(output_text_path) if output_text_path else None,
         "outputJson": str(output_json_path) if output_json_path else None,
+        "requestedDocumentType": args.document_type,
+        "resolvedDocumentType": resolved_document_type,
         "structuredEngine": (
             structured_result.engine if structured_result is not None else None
         ),
