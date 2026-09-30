@@ -229,8 +229,26 @@ SOURCES: list[dict[str, Any]] = [
         }
     },
     {
+        "id": "phoenix-petroleum-invoice-472557",
+        "url": "https://assets.publishing.service.gov.uk/media/5a7b873fed915d131105fd51/UK-2798-revision-2.pdf",
+        "marker": "Phoenix Petroleum",
+        "supplier": "Phoenix Petroleum Limited",
+        "layout_class": "embedded-scanned-separate-discount-row",
+        "ocr_page_limit": 18,
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "472557",
+                "data.currency": "GBP",
+                "data.subtotal": "139.65",
+                "data.vat_amount": "0.00",
+                "data.total": "139.65"
+            }
+        }
+    },
+    {
         "id": "jordan-customs-commercial-invoice-2019014782",
-        "url": "https://tradeportal.customs.gov.jo/media/%D9%81%D8%A7%D8%AA%D9%88%D8%B1%D8%A9%20%D8%AA%D8%B5%D8%AF%D9%8A%D8%B1%D9%8A%D8%A9%20%D8%BA%D8%B0%D8%A7%D8%A6%D9%8A%D8%A9.pdf",
+        "url": "https://tradeportal.customs.gov.jo/media/%D9%81%D8%A7%D8%AA%D9%88%D8%B1%D8%A9%20%D8%AA%D8%B5%D0%B4%D9%8A%D8%B1%D9%8A%D8%A9%20%D8%BA%D8%B0%D8%A7%D8%A6%D9%8A%D8%A9.pdf",
         "marker": "2019014782",
         "supplier": "Jordan export commercial invoice",
         "layout_class": "bilingual-commercial-invoice",
