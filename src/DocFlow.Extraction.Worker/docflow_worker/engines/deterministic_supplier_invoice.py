@@ -1,5 +1,5 @@
 from docflow_worker.deterministic_text_fields import (
-    extract_labeled_text_value,
+    extract_labeled_identifier,
     extract_totals_from_text,
     infer_currency,
 )
@@ -33,17 +33,17 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
         invoice = SupplierInvoiceData(
             supplier_name=self._extract_supplier_name(content),
             invoice_number=(
-                # Structured table metadata is more precise when both representations
-                # exist. Text-label extraction remains the fallback for borderless and
-                # public-reference invoices that do not expose a metadata table.
-                self._metadata_value(
+                # Text labels are the most faithful representation for Xero-style and
+                # OCR invoices, but the extracted value must be reduced to a compact
+                # identifier so neighboring columns are not absorbed into the number.
+                extract_labeled_identifier(
+                    content,
+                    ("invoice number", "invoice no.", "invoice no"),
+                )
+                or self._metadata_value(
                     metadata,
                     "invoice no",
                     "invoice number",
-                )
-                or extract_labeled_text_value(
-                    content,
-                    ("invoice number", "invoice no.", "invoice no"),
                 )
             ),
             invoice_date=self._parse_date(
