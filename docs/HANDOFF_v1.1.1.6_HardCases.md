@@ -111,7 +111,7 @@ Do not derive expected values from DocFlow output.
 
 ## 5. Benchmark gate
 
-The hardened 1.1.1.5 public-reference workflow is inherited.
+The hardened public-reference workflow is inherited and now also tolerates unrelated third-party source outages without allowing the hard case under test to disappear silently.
 
 A run must fail when:
 
@@ -119,7 +119,8 @@ A run must fail when:
 - the benchmark returns non-zero;
 - an admitted document fails expected fields/type/status;
 - a benchmark report is missing;
-- validation-status ground truth is missing for any admitted document.
+- validation-status ground truth is missing for any admitted document;
+- the required current hard-case document is missing from the generated manifest.
 
 Reports must still upload on failure for diagnosis.
 
@@ -141,7 +142,91 @@ A fix must be generic to the failure class. Do not add supplier-id-specific extr
 
 Source-specific logic is acceptable only inside the public corpus acquisition tooling when it is needed to select the intended original page from a larger public pack; it must not leak into the production extraction engine.
 
-## 7. ML/LLM decision rule
+## 7. Completed hard-case evidence in this milestone
+
+### 7.1 Town House Publishing invoice 0023902 — line-level discounts
+
+Measured failure classes:
+
+- subtotal label containing a parenthetical discount amount was able to overwrite the real subtotal;
+- invoice items with explicit percentage discounts failed the inherited `quantity × unit price == line total` invariant;
+- right-aligned OCR fallback initially risked treating VAT percentages as item discounts.
+
+Generic fixes:
+
+- subtotal extraction ignores monetary values inside parenthetical notes when choosing the actual subtotal;
+- `SupplierInvoiceItem` has optional `discount_rate`;
+- invoice table extraction understands `Discount/Disc` columns;
+- invoice line validation uses `quantity × unit_price × (1 - discount_rate / 100)`;
+- right-aligned percent values become discounts only when the table schema explicitly indicates a discount column.
+
+The real Town House document now passes the complete public-reference benchmark.
+
+### 7.2 Phoenix Petroleum invoice 472557 — mixed-page OCR + document-level discount
+
+The selected source page contained only about 90 characters of native PDF text while the actual invoice was an embedded image.
+
+Measured failure classes:
+
+1. **OCR policy** — the old extractor skipped OCR whenever any native text existed, so only the figure caption reached document-type detection.
+2. **Document-level arithmetic** — the invoice has gross line value `158.65`, explicit `Less discount 19.00`, VAT `0.00`, and net amount `139.65`; the old invoice model only represented item-level percentage discounts.
+3. **OCR total ambiguity** — the printed net total was imperfectly OCRed while a remittance area repeated a gross-looking amount, so generic total-label extraction could not safely choose the business total by text alone.
+
+Generic fixes:
+
+- pages with very little native text plus embedded images are OCR candidates even when not text-empty;
+- mixed-page OCR preserves native text while OCRing image regions;
+- `SupplierInvoiceData` has optional document-level `discount_amount`;
+- supplier invoice engine v2 performs conservative discount reconciliation only when explicit discount and arithmetic evidence agree;
+- line-level percentage discounts and document-level amount discounts remain separate concepts;
+- synthetic and real regression tests cover the new behavior.
+
+Verified Phoenix arithmetic:
+
+```text
+gross line value: 158.65 GBP
+document discount: 19.00 GBP
+VAT:               0.00 GBP
+net subtotal:      139.65 GBP
+net total:         139.65 GBP
+validation:        valid
+OCR applied:       yes
+```
+
+## 8. Current measured public-reference baseline
+
+After the Town House and Phoenix fixes, Public Reference Benchmark run #63 on implementation head `ef75677056cab61e959cc13a8abfb5168c08b008` produced:
+
+```text
+documents_total: 9
+documents_passed: 9
+documents_failed: 0
+document_type_correct: 9/9
+validation_status_correct: 9/9
+fields_checked: 43
+fields_matched: 43
+field_accuracy: 1.0
+audit_errors: 0
+audit_warnings: 0
+```
+
+The source pack remains externally hosted and therefore some unrelated source URLs can transiently fail. The benchmark gate requires the active hard case while retaining a minimum viable public corpus so third-party outages do not masquerade as extraction regressions.
+
+This is engineering regression evidence over a small curated corpus, **not** a production accuracy percentage.
+
+## 9. Current CI state
+
+Current hard-case implementation has been verified through:
+
+- Python Worker CI — green;
+- Benchmark Smoke — green;
+- Scanned OCR E2E — green;
+- Public Reference Benchmark — green, including Phoenix;
+- Automation E2E — green after updating its expected invoice engine contract to `deterministic_supplier_invoice_v2`.
+
+Automation E2E run #91 verifies that the engine-version update did not break the .NET upload → worker → persistence path.
+
+## 10. ML/LLM decision rule
 
 Do not add ONNX or an external LLM simply because a new document fails.
 
@@ -154,13 +239,23 @@ Model fallback becomes justified only when measured failures demonstrate semanti
 - clearer document-type detection;
 - deterministic field-label rules.
 
+The hard cases fixed so far required deterministic/OCR improvements only. There is still no measured evidence that an ONNX/LLM production fallback is required.
+
 If such a failure class appears, first create an isolated benchmark experiment. Do not replace the current deterministic production path immediately.
 
-## 8. Initial engineering target
+## 11. Remaining coverage gaps
 
-Expand the admitted public corpus beyond the current 8 unique documents.
+The current public-reference corpus is still predominantly English. Version 1.1.1.6 remains active because the following intended coverage is not yet demonstrated:
 
-A useful target for this milestone is:
+- decimal-comma / European numeric formats;
+- non-English or bilingual invoice labels;
+- at least one genuine multi-page item-table case;
+- multiple VAT/tax-rate summaries;
+- broader OCR degradation beyond the current scans and mixed-page example.
+
+## 12. Engineering target
+
+A useful target for this milestone remains:
 
 ```text
 15+ admitted unique PDFs
@@ -172,7 +267,7 @@ at least 1 genuinely multi-page item-table case
 
 These numbers are engineering coverage targets, not statistical accuracy claims.
 
-## 9. Completion criteria
+## 13. Completion criteria
 
 Version 1.1.1.6 can close when:
 
@@ -188,21 +283,23 @@ Version 1.1.1.6 can close when:
 10. Public Reference Benchmark is green or any remaining intentionally unsupported cases are explicitly documented with evidence and architecture consequences;
 11. the milestone records whether there is now evidence for an ONNX/LLM experiment.
 
-## 10. Immediate next action
+## 14. Immediate next stage
 
-Find and admit the first new public documents that add coverage rather than more examples of the same Xero-style English invoice.
+Target a document that expands **different** difficulty classes rather than another discount variant.
 
-Preferred first additions:
+Preferred next admission combines as many of these as possible:
 
 ```text
-1. decimal-comma / European-format invoice
-2. invoice with explicit discount or freight
-3. true multi-page item table
-4. more degraded scanned invoice
+German/European invoice
++ decimal comma / thousands separators
++ non-US date format
++ non-English labels
++ multi-page item layout if available
++ multiple VAT/tax summaries if present
 ```
 
-Run the complete benchmark immediately after each small batch so failures remain attributable.
+The next batch should remain small enough that any failure can still be attributed to a concrete root cause, but related extraction/test changes should be committed as one logical engineering unit rather than many microcommits.
 
 ---
 
-Current status: **1.1.1.6 HardCases started; baseline is 8/8 green from 1.1.1.5.**
+Current status: **1.1.1.6 HardCases ACTIVE; Town House and Phoenix hard-case classes are closed, current real public regression baseline is 9/9 green, next focus is locale + multi-page coverage.**
