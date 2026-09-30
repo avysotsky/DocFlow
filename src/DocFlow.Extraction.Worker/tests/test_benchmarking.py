@@ -7,6 +7,7 @@ from docflow_worker.benchmarking import (
     BenchmarkCaseResult,
     FieldComparison,
     _build_metrics,
+    classify_failure_reasons,
     compare_expected_fields,
     load_manifest,
 )
@@ -58,6 +59,52 @@ def test_compare_expected_fields_reports_missing_and_mismatch() -> None:
     assert "Path not found" in comparisons[1].error
 
 
+def test_classify_failure_reasons_distinguishes_failure_modes() -> None:
+    comparisons = [
+        FieldComparison(
+            path="data.currency",
+            expected="USD",
+            actual="EUR",
+            matched=False,
+        ),
+        FieldComparison(
+            path="data.total",
+            expected="100.00",
+            actual=None,
+            matched=False,
+            error="Path not found: 'total'",
+        ),
+    ]
+
+    reasons = classify_failure_reasons(
+        expected_document_type="supplier_invoice",
+        actual_document_type="supplier_quotation",
+        expected_validation_status="valid",
+        actual_validation_status="invalid",
+        comparisons=comparisons,
+    )
+
+    assert reasons == [
+        "document_type_mismatch",
+        "validation_status_mismatch",
+        "missing_field",
+        "field_mismatch",
+    ]
+
+
+def test_classify_failure_reasons_processing_error_is_terminal() -> None:
+    reasons = classify_failure_reasons(
+        expected_document_type="supplier_invoice",
+        actual_document_type=None,
+        expected_validation_status="valid",
+        actual_validation_status=None,
+        comparisons=[],
+        processing_error=True,
+    )
+
+    assert reasons == ["processing_error"]
+
+
 def test_load_manifest_rejects_duplicate_document_ids(tmp_path: Path) -> None:
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
@@ -85,7 +132,7 @@ def test_load_manifest_rejects_duplicate_document_ids(tmp_path: Path) -> None:
         load_manifest(manifest_path)
 
 
-def test_build_metrics_counts_document_and_field_accuracy() -> None:
+def test_build_metrics_counts_document_field_and_failure_accuracy() -> None:
     results = [
         BenchmarkCaseResult(
             id="ok",
@@ -120,15 +167,34 @@ def test_build_metrics_counts_document_and_field_accuracy() -> None:
                     matched=False,
                 )
             ],
+            failure_reasons=[
+                "document_type_mismatch",
+                "validation_status_mismatch",
+                "field_mismatch",
+            ],
+        ),
+        BenchmarkCaseResult(
+            id="error",
+            file="missing.pdf",
+            passed=False,
+            expected_document_type="supplier_invoice",
+            failure_reasons=["processing_error"],
+            error="FileNotFoundError: missing.pdf",
         ),
     ]
 
     metrics = _build_metrics(results)
 
-    assert metrics.documents_total == 2
+    assert metrics.documents_total == 3
     assert metrics.documents_passed == 1
-    assert metrics.documents_failed == 1
-    assert metrics.document_pass_rate == 0.5
-    assert metrics.document_type_accuracy == 0.5
+    assert metrics.documents_failed == 2
+    assert metrics.document_pass_rate == pytest.approx(1 / 3)
+    assert metrics.document_type_accuracy == pytest.approx(1 / 3)
     assert metrics.validation_status_accuracy == 0.5
     assert metrics.field_accuracy == 0.5
+    assert metrics.failure_reason_counts == {
+        "document_type_mismatch": 1,
+        "field_mismatch": 1,
+        "processing_error": 1,
+        "validation_status_mismatch": 1,
+    }
