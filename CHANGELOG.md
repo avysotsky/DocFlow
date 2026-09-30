@@ -77,6 +77,11 @@ Initial end-to-end MVP milestone for supplier quotation processing.
   - detailed check results
   - confidence value
 - Python CLI support for semantic extraction and structured JSON output.
+- Dedicated local worker output directory:
+  - `src/DocFlow.Extraction.Worker/output/`
+  - simple output file names are automatically written there
+  - generated extraction artifacts are excluded from Git
+- Python package metadata directories (`*.egg-info/`) are excluded from Git.
 - GitHub Actions CI for both .NET and Python worker.
 
 ### Verified
@@ -124,6 +129,7 @@ The persisted document finished with status `Processed`.
 - .NET owns application flow and persistence.
 - Semantic extraction is separated from deterministic validation.
 - Structured extraction consumes `DocumentContent` with blocks/tables instead of relying only on raw page text.
+- Runtime extraction artifacts are separated from source code and kept in the ignored worker `output/` directory.
 - Heavy infrastructure such as RabbitMQ, Kafka, Redis and Kubernetes is intentionally deferred until justified by the system requirements.
 
 ### Known limitations
