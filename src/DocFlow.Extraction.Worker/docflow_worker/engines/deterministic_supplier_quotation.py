@@ -158,9 +158,24 @@ class DeterministicSupplierQuotationEngine(StructuredExtractionEngine):
 
         headers = [cls._normalize_header(cell) for cell in rows[0]]
         return (
-            "sku" in headers
-            and "description" in headers
-            and ("qty" in headers or "quantity" in headers)
+            cls._find_header_index(
+                headers,
+                "sku",
+                "item code",
+                "product code",
+                "part number",
+                "part no",
+            )
+            is not None
+            and cls._find_header_index(
+                headers,
+                "description",
+                "item description",
+                "product description",
+                "item",
+            )
+            is not None
+            and cls._find_header_index(headers, "qty", "quantity") is not None
         )
 
     @classmethod
