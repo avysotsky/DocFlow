@@ -6,6 +6,7 @@ on:
       - 'DocFlow/v_1.1.1.5_RealCorpus'
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
+      - '.github/scripts/dump_public_reference_text.py'
       - '.github/workflows/public-reference-benchmark.yml'
       - 'src/DocFlow.Extraction.Worker/**'
   workflow_dispatch:
@@ -38,6 +39,10 @@ jobs:
           python .github/scripts/build_public_reference_corpus.py \
             --output /tmp/docflow-public-reference \
             --min-documents 1
+
+          python .github/scripts/dump_public_reference_text.py \
+            --corpus /tmp/docflow-public-reference/corpus \
+            --output /tmp/docflow-public-reference/page-texts.json
 
           echo "=== build summary ==="
           cat /tmp/docflow-public-reference/build-summary.json
@@ -102,5 +107,6 @@ jobs:
           path: |
             /tmp/docflow-public-reference/build-summary.json
             /tmp/docflow-public-reference/sources-report.json
+            /tmp/docflow-public-reference/page-texts.json
             /tmp/docflow-public-reference/manifest.json
             /tmp/docflow-public-reference/results/*.json
