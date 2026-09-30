@@ -83,3 +83,73 @@ class SupplierInvoiceValidator(SupplierQuotationValidator):
             message="All invoice line totals match quantity × unit price after item discount.",
             details={"checked_items": len(invoice.items)},
         )
+
+    def _validate_subtotal(
+        self,
+        invoice: SupplierInvoiceData,
+    ) -> ValidationCheckResult:
+        if invoice.discount_amount is None:
+            return super()._validate_subtotal(invoice)  # type: ignore[arg-type]
+
+        if invoice.subtotal is None:
+            return ValidationCheckResult(
+                status="skipped",
+                message="Subtotal was not extracted.",
+            )
+
+        if invoice.discount_amount < 0:
+            return ValidationCheckResult(
+                status="failed",
+                message="Invoice-level discount cannot be negative.",
+                details={"discount_amount": str(invoice.discount_amount)},
+            )
+
+        if not invoice.items or any(item.line_total is None for item in invoice.items):
+            return ValidationCheckResult(
+                status="skipped",
+                message=(
+                    "Discounted subtotal cannot be checked because item line totals are incomplete."
+                ),
+            )
+
+        gross = self._money(
+            sum(
+                (item.line_total for item in invoice.items if item.line_total is not None),
+                Decimal("0"),
+            )
+        )
+        expected = self._money(gross - invoice.discount_amount)
+        actual = self._money(invoice.subtotal)
+
+        if expected < 0:
+            return ValidationCheckResult(
+                status="failed",
+                message="Invoice-level discount exceeds the gross item total.",
+                details={
+                    "gross": str(gross),
+                    "discount_amount": str(invoice.discount_amount),
+                },
+            )
+
+        if abs(expected - actual) > self.tolerance:
+            return ValidationCheckResult(
+                status="failed",
+                message="Subtotal does not equal gross item totals minus invoice-level discount.",
+                details={
+                    "gross": str(gross),
+                    "discount_amount": str(invoice.discount_amount),
+                    "expected": str(expected),
+                    "actual": str(actual),
+                },
+            )
+
+        return ValidationCheckResult(
+            status="passed",
+            message="Subtotal equals gross item totals minus invoice-level discount.",
+            details={
+                "gross": str(gross),
+                "discount_amount": str(invoice.discount_amount),
+                "expected": str(expected),
+                "actual": str(actual),
+            },
+        )
