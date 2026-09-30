@@ -36,55 +36,98 @@ jobs:
 
       - name: Generate benchmark corpus
         run: |
-          mkdir -p /tmp/docflow-benchmark
+          mkdir -p /tmp/docflow-benchmark/corpus
           python .github/scripts/generate_supplier_quotation_pdf.py \
-            /tmp/docflow-benchmark/quotation.pdf
+            /tmp/docflow-benchmark/corpus/quotation.pdf
           python .github/scripts/generate_supplier_invoice_pdf.py \
-            /tmp/docflow-benchmark/invoice.pdf
+            /tmp/docflow-benchmark/corpus/invoice.pdf
+          cp /tmp/docflow-benchmark/corpus/quotation.pdf \
+            /tmp/docflow-benchmark/corpus/quotation-duplicate.pdf
 
-          cat > /tmp/docflow-benchmark/manifest.json <<'JSON'
-          {
-            "version": 1,
-            "documents": [
-              {
-                "id": "synthetic-quotation",
-                "file": "quotation.pdf",
-                "document_type": "auto",
-                "expected": {
-                  "document_type": "supplier_quotation",
-                  "validation_status": "valid",
-                  "fields": {
-                    "data.quotation_number": "QT-2026-183",
-                    "data.currency": "EUR",
-                    "data.subtotal": "1457.00",
-                    "data.vat_amount": "291.40",
-                    "data.total": "1748.40",
-                    "data.items.0.sku": "AX-100",
-                    "confidence": 1.0
+      - name: Inventory benchmark corpus
+        working-directory: src/DocFlow.Extraction.Worker
+        run: |
+          python corpus_inventory.py \
+            --corpus /tmp/docflow-benchmark/corpus \
+            --output /tmp/docflow-benchmark/corpus-inventory.json
+
+          jq -e '
+            .documents_total == 3
+            and .unique_contents == 2
+            and .duplicates == 1
+            and .errors == 0
+            and ([.documents[].source_kind] | all(. == "digital"))
+            and ([.documents[] | select(.file == "quotation-duplicate.pdf") | .duplicate_of] | length) == 1
+            and ([.documents[] | select(.file == "quotation-duplicate.pdf") | .duplicate_of != null] | all)
+          ' /tmp/docflow-benchmark/corpus-inventory.json >/dev/null
+
+      - name: Create benchmark manifest from inventory
+        run: |
+          quotation_sha=$(jq -r '.documents[] | select(.file == "quotation.pdf") | .sha256' \
+            /tmp/docflow-benchmark/corpus-inventory.json)
+          invoice_sha=$(jq -r '.documents[] | select(.file == "invoice.pdf") | .sha256' \
+            /tmp/docflow-benchmark/corpus-inventory.json)
+
+          jq -n \
+            --arg quotation_sha "$quotation_sha" \
+            --arg invoice_sha "$invoice_sha" \
+            '{
+              version: 1,
+              documents: [
+                {
+                  id: "synthetic-quotation",
+                  file: "corpus/quotation.pdf",
+                  sha256: $quotation_sha,
+                  metadata: {
+                    supplier: "supplier-a",
+                    source_kind: "digital",
+                    layout_class: "borderless",
+                    language: "en",
+                    tags: ["quotation", "vat"]
+                  },
+                  document_type: "auto",
+                  expected: {
+                    document_type: "supplier_quotation",
+                    validation_status: "valid",
+                    fields: {
+                      "data.quotation_number": "QT-2026-183",
+                      "data.currency": "EUR",
+                      "data.subtotal": "1457.00",
+                      "data.vat_amount": "291.40",
+                      "data.total": "1748.40",
+                      "data.items.0.sku": "AX-100",
+                      confidence: 1.0
+                    }
+                  }
+                },
+                {
+                  id: "synthetic-invoice",
+                  file: "corpus/invoice.pdf",
+                  sha256: $invoice_sha,
+                  metadata: {
+                    supplier: "supplier-b",
+                    source_kind: "digital",
+                    layout_class: "table",
+                    language: "en",
+                    tags: ["invoice", "purchase-order"]
+                  },
+                  document_type: "auto",
+                  expected: {
+                    document_type: "supplier_invoice",
+                    validation_status: "valid",
+                    fields: {
+                      "data.invoice_number": "INV-2026-091",
+                      "data.currency": "EUR",
+                      "data.subtotal": "1457.00",
+                      "data.vat_amount": "291.40",
+                      "data.total": "1748.40",
+                      "data.items.0.sku": "AX-100",
+                      confidence: 1.0
+                    }
                   }
                 }
-              },
-              {
-                "id": "synthetic-invoice",
-                "file": "invoice.pdf",
-                "document_type": "auto",
-                "expected": {
-                  "document_type": "supplier_invoice",
-                  "validation_status": "valid",
-                  "fields": {
-                    "data.invoice_number": "INV-2026-091",
-                    "data.currency": "EUR",
-                    "data.subtotal": "1457.00",
-                    "data.vat_amount": "291.40",
-                    "data.total": "1748.40",
-                    "data.items.0.sku": "AX-100",
-                    "confidence": 1.0
-                  }
-                }
-              }
-            ]
-          }
-          JSON
+              ]
+            }' > /tmp/docflow-benchmark/manifest.json
 
       - name: Run benchmark CLI
         working-directory: src/DocFlow.Extraction.Worker
@@ -94,7 +137,7 @@ jobs:
             --output /tmp/docflow-benchmark/report.json \
             --disable-ocr
 
-      - name: Verify report metrics
+      - name: Verify report metrics and breakdowns
         run: |
           jq -e '
             .metrics.documents_total == 2
@@ -105,6 +148,13 @@ jobs:
             and .metrics.validation_status_accuracy == 1
             and .metrics.field_accuracy == 1
             and (.metrics.failure_reason_counts | length) == 0
+            and .breakdowns.by_supplier["supplier-a"].documents_passed == 1
+            and .breakdowns.by_supplier["supplier-b"].documents_passed == 1
+            and .breakdowns.by_source_kind.digital.documents_total == 2
+            and .breakdowns.by_layout_class.borderless.documents_total == 1
+            and .breakdowns.by_layout_class.table.documents_total == 1
+            and .breakdowns.by_language.en.documents_total == 2
+            and ([.documents[].file_sha256] | all(length == 64))
           ' /tmp/docflow-benchmark/report.json >/dev/null
 
-          echo "Benchmark smoke passed."
+          echo "Benchmark inventory + smoke passed."
