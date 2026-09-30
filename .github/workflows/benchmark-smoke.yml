@@ -1,0 +1,110 @@
+name: Benchmark Smoke
+
+on:
+  push:
+    branches:
+      - 'DocFlow/v_*'
+    paths:
+      - 'src/DocFlow.Extraction.Worker/**'
+      - 'benchmarks/**'
+      - '.github/scripts/generate_supplier_quotation_pdf.py'
+      - '.github/scripts/generate_supplier_invoice_pdf.py'
+      - '.github/workflows/benchmark-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
+
+      - name: Install Python worker
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pip install -e ".[dev]"
+
+      - name: Generate benchmark corpus
+        run: |
+          mkdir -p /tmp/docflow-benchmark
+          python .github/scripts/generate_supplier_quotation_pdf.py \
+            /tmp/docflow-benchmark/quotation.pdf
+          python .github/scripts/generate_supplier_invoice_pdf.py \
+            /tmp/docflow-benchmark/invoice.pdf
+
+          cat > /tmp/docflow-benchmark/manifest.json <<'JSON'
+          {
+            "version": 1,
+            "documents": [
+              {
+                "id": "synthetic-quotation",
+                "file": "quotation.pdf",
+                "document_type": "auto",
+                "expected": {
+                  "document_type": "supplier_quotation",
+                  "validation_status": "valid",
+                  "fields": {
+                    "data.quotation_number": "QT-2026-183",
+                    "data.currency": "EUR",
+                    "data.subtotal": "1457.00",
+                    "data.vat_amount": "291.40",
+                    "data.total": "1748.40",
+                    "data.items.0.sku": "AX-100",
+                    "confidence": 1.0
+                  }
+                }
+              },
+              {
+                "id": "synthetic-invoice",
+                "file": "invoice.pdf",
+                "document_type": "auto",
+                "expected": {
+                  "document_type": "supplier_invoice",
+                  "validation_status": "valid",
+                  "fields": {
+                    "data.invoice_number": "INV-2026-091",
+                    "data.currency": "EUR",
+                    "data.subtotal": "1457.00",
+                    "data.vat_amount": "291.40",
+                    "data.total": "1748.40",
+                    "data.items.0.sku": "AX-100",
+                    "confidence": 1.0
+                  }
+                }
+              }
+            ]
+          }
+          JSON
+
+      - name: Run benchmark CLI
+        working-directory: src/DocFlow.Extraction.Worker
+        run: |
+          python benchmark.py \
+            --manifest /tmp/docflow-benchmark/manifest.json \
+            --output /tmp/docflow-benchmark/report.json \
+            --disable-ocr
+
+      - name: Verify report metrics
+        run: |
+          jq -e '
+            .metrics.documents_total == 2
+            and .metrics.documents_passed == 2
+            and .metrics.documents_failed == 0
+            and .metrics.document_pass_rate == 1
+            and .metrics.document_type_accuracy == 1
+            and .metrics.validation_status_accuracy == 1
+            and .metrics.field_accuracy == 1
+            and (.metrics.failure_reason_counts | length) == 0
+          ' /tmp/docflow-benchmark/report.json >/dev/null
+
+          echo "Benchmark smoke passed."
