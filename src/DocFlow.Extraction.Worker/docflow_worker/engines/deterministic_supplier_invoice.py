@@ -1,4 +1,5 @@
 from docflow_worker.deterministic_text_fields import (
+    extract_labeled_text_value,
     extract_totals_from_text,
     infer_currency,
 )
@@ -31,10 +32,16 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
 
         invoice = SupplierInvoiceData(
             supplier_name=self._extract_supplier_name(content),
-            invoice_number=self._metadata_value(
-                metadata,
-                "invoice no",
-                "invoice number",
+            invoice_number=(
+                extract_labeled_text_value(
+                    content,
+                    ("invoice number", "invoice no.", "invoice no"),
+                )
+                or self._metadata_value(
+                    metadata,
+                    "invoice no",
+                    "invoice number",
+                )
             ),
             invoice_date=self._parse_date(
                 self._metadata_value(metadata, "invoice date")
