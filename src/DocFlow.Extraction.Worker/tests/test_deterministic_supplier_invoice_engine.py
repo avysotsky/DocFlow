@@ -230,3 +230,42 @@ def test_extracts_numeric_invoice_number_from_noisy_ocr_line() -> None:
     invoice = SupplierInvoiceData.model_validate(result.data)
 
     assert invoice.invoice_number == "2019014782"
+
+
+def test_paid_invoice_keeps_gross_total_instead_of_zero_amount_due() -> None:
+    content = DocumentContent(
+        pages=[
+            PageContent(
+                page_number=1,
+                width=595,
+                height=842,
+                text=(
+                    "TAX INVOICE\n"
+                    "Invoice Number\n"
+                    "INV-23226\n"
+                    "Subtotal\n"
+                    "2.49\n"
+                    "TOTAL VAT 20%\n"
+                    "0.50\n"
+                    "TOTAL GBP\n"
+                    "2.99\n"
+                    "Less Amount Paid\n"
+                    "2.99\n"
+                    "AMOUNT DUE GBP\n"
+                    "0.00\n"
+                ),
+                words=[],
+                blocks=[],
+                tables=[],
+            )
+        ]
+    )
+
+    result = asyncio.run(DeterministicSupplierInvoiceEngine().extract(content))
+    invoice = SupplierInvoiceData.model_validate(result.data)
+
+    assert invoice.invoice_number == "INV-23226"
+    assert invoice.subtotal == Decimal("2.49")
+    assert invoice.vat_rate == Decimal("20")
+    assert invoice.vat_amount == Decimal("0.50")
+    assert invoice.total == Decimal("2.99")
