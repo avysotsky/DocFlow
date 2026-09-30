@@ -164,7 +164,17 @@ def extract_totals_from_text(
         numbers = _numbers(line, parse_decimal)
 
         if _SUBTOTAL_PATTERN.match(normalized):
-            amount = _amount_for_labeled_line(lines, index, numbers, parse_decimal)
+            # Parenthetical notes can contain monetary values that are not the
+            # subtotal itself, e.g. "Subtotal (includes a discount of 34.50) 103.50".
+            # Ignore numbers inside parentheses before selecting the labeled amount.
+            subtotal_line = re.sub(r"\([^)]*\)", "", line)
+            subtotal_numbers = _numbers(subtotal_line, parse_decimal)
+            amount = _amount_for_labeled_line(
+                lines,
+                index,
+                subtotal_numbers,
+                parse_decimal,
+            )
             if amount is not None:
                 subtotal = amount
             continue
