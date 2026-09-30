@@ -192,6 +192,7 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
         quantity_index = cls._find_header_index(headers, "qty", "quantity")
         unit_index = cls._find_header_index(headers, "unit", "uom")
         unit_price_index = cls._find_header_prefix(headers, "unit price", "price")
+        discount_index = cls._find_header_prefix(headers, "discount", "disc")
         line_total_index = cls._find_header_prefix(
             headers,
             "line total",
@@ -214,6 +215,11 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
             if len(row) == len(headers):
                 description = cls._row_value(row, description_index)
                 quantity = cls._parse_decimal(cls._row_value(row, quantity_index))
+                discount_value = (
+                    cls._row_value(row, discount_index)
+                    if discount_index is not None
+                    else None
+                )
                 if description and quantity is not None:
                     item = SupplierInvoiceItem(
                         sku=(
@@ -231,6 +237,11 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
                         unit_price=(
                             cls._parse_decimal(cls._row_value(row, unit_price_index))
                             if unit_price_index is not None
+                            else None
+                        ),
+                        discount_rate=(
+                            cls._parse_decimal(discount_value.replace("%", ""))
+                            if discount_value
                             else None
                         ),
                         line_total=(
@@ -275,6 +286,7 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
 
         quantity = cls._parse_decimal(cells[quantity_index])
         unit_price = cls._parse_decimal(cells[unit_price_index])
+        discount_rate = cls._parse_decimal(cells[percent_index].replace("%", ""))
         line_total = cls._parse_decimal(cells[line_total_index])
         if quantity is None or unit_price is None or line_total is None:
             return None
@@ -292,6 +304,7 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
             description=description,
             quantity=quantity,
             unit_price=unit_price,
+            discount_rate=discount_rate,
             line_total=line_total,
         )
 
