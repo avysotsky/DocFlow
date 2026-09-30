@@ -44,6 +44,15 @@ _VAT_IDENTIFIER_PATTERN = re.compile(
     r"^(?:vat|tax)\s+(?:number|no\.?|id|reg(?:istration)?(?:\s+no\.?)?)\b",
     re.IGNORECASE,
 )
+_INVOICE_IDENTIFIER_PATTERNS = (
+    # Common invoice prefixes. Stop at whitespace so adjacent layout text such as
+    # "Currency EUR" or "PAYMENT ADVICE" is not absorbed into the identifier.
+    re.compile(r"\bINV(?:OICE)?[._/-]*\d[A-Z0-9._/-]*\b", re.IGNORECASE),
+    # Other compact business identifiers such as SI-10482 or TAX/240031.
+    re.compile(r"\b[A-Z]{1,8}[._/-]\d[A-Z0-9._/-]*\b", re.IGNORECASE),
+    # Numeric-only invoice numbers are common on customs/commercial invoices.
+    re.compile(r"\b\d{6,}\b"),
+)
 
 
 def infer_currency(content: DocumentContent) -> str | None:
@@ -94,6 +103,47 @@ def extract_labeled_text_value(
                     value = match.group(1).strip()
                     if value:
                         return value
+
+    return None
+
+
+def extract_labeled_identifier(
+    content: DocumentContent,
+    labels: Sequence[str],
+    *,
+    max_lookahead_lines: int = 4,
+) -> str | None:
+    """Read a compact invoice-like identifier near a label without layout noise.
+
+    PDF/OCR extraction frequently concatenates neighboring columns or places an
+    address line between a visual label and its value. This helper deliberately
+    returns only an identifier token, never the whole remainder of an OCR line.
+    """
+    lines = _lines(content)
+    normalized_labels = {_normalize_label(label) for label in labels}
+
+    for index, line in enumerate(lines):
+        normalized_line = _normalize_label(line)
+
+        if normalized_line in normalized_labels:
+            upper_bound = min(len(lines), index + 1 + max_lookahead_lines)
+            for candidate_line in lines[index + 1 : upper_bound]:
+                identifier = _invoice_identifier_from_text(candidate_line)
+                if identifier:
+                    return identifier
+            continue
+
+        for raw_label in labels:
+            match = re.match(
+                rf"^{re.escape(raw_label)}\s*[:.#-]?\s*(.+)$",
+                line.strip(),
+                re.IGNORECASE,
+            )
+            if not match:
+                continue
+            identifier = _invoice_identifier_from_text(match.group(1))
+            if identifier:
+                return identifier
 
     return None
 
@@ -194,6 +244,14 @@ def _lines(content: DocumentContent) -> list[str]:
 
 def _normalize_label(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
+def _invoice_identifier_from_text(text: str) -> str | None:
+    for pattern in _INVOICE_IDENTIFIER_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(0).strip()
+    return None
 
 
 def _numbers(
