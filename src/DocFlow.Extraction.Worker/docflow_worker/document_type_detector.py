@@ -8,6 +8,12 @@ def detect_document_type(content: DocumentContent) -> str:
     """Detect the supported supplier document type using deterministic text markers."""
     text = content.text.lower()
 
+    # A proforma invoice is still an invoice-class supplier document in DocFlow's
+    # current two-type model. Treat the explicit title as a strong deterministic
+    # marker before scoring the more generic invoice/quotation metadata labels.
+    if "proforma invoice" in text or "pro-forma invoice" in text:
+        return "supplier_invoice"
+
     quotation_markers = (
         "quotation no",
         "quotation number",
