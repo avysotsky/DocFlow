@@ -1,3 +1,5 @@
+import asyncio
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from docflow_worker.benchmarking import (
     classify_failure_reasons,
     compare_expected_fields,
     load_manifest,
+    run_benchmark,
 )
 
 
@@ -130,6 +133,112 @@ def test_load_manifest_rejects_duplicate_document_ids(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="ids must be unique"):
         load_manifest(manifest_path)
+
+
+def test_load_manifest_normalizes_metadata_and_sha256(tmp_path: Path) -> None:
+    pdf_bytes = b"private supplier pdf placeholder"
+    digest = hashlib.sha256(pdf_bytes).hexdigest()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "documents": [
+                    {
+                        "id": "real-001",
+                        "file": "corpus/real-001.pdf",
+                        "sha256": digest.upper(),
+                        "metadata": {
+                            "supplier": "  Supplier A  ",
+                            "source_kind": "digital",
+                            "layout_class": "  multi-page-table  ",
+                            "language": "  en  ",
+                            "tags": ["vat", "vat", "purchase-order"],
+                        },
+                        "expected": {"document_type": "supplier_invoice"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = load_manifest(manifest_path)
+    case = manifest.documents[0]
+
+    assert case.sha256 == digest
+    assert case.metadata.supplier == "Supplier A"
+    assert case.metadata.source_kind == "digital"
+    assert case.metadata.layout_class == "multi-page-table"
+    assert case.metadata.language == "en"
+    assert case.metadata.tags == ["vat", "purchase-order"]
+
+
+def test_load_manifest_rejects_invalid_sha256(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "documents": [
+                    {
+                        "id": "real-001",
+                        "file": "corpus/real-001.pdf",
+                        "sha256": "not-a-sha256",
+                        "expected": {"document_type": "supplier_invoice"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="64-character hexadecimal digest"):
+        load_manifest(manifest_path)
+
+
+def test_run_benchmark_reports_corpus_integrity_error_before_pdf_processing(
+    tmp_path: Path,
+) -> None:
+    corpus_directory = tmp_path / "corpus"
+    corpus_directory.mkdir()
+    pdf_path = corpus_directory / "real-001.pdf"
+    pdf_path.write_bytes(b"not actually a pdf; hash check should run first")
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "documents": [
+                    {
+                        "id": "real-001",
+                        "file": "corpus/real-001.pdf",
+                        "sha256": "0" * 64,
+                        "metadata": {
+                            "supplier": "Supplier A",
+                            "source_kind": "scanned",
+                            "tags": ["noisy"],
+                        },
+                        "expected": {"document_type": "supplier_invoice"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = asyncio.run(run_benchmark(manifest_path))
+    result = report.documents[0]
+
+    assert result.passed is False
+    assert result.failure_reasons == ["corpus_integrity_error"]
+    assert result.file_sha256 == hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    assert result.metadata.supplier == "Supplier A"
+    assert result.metadata.source_kind == "scanned"
+    assert result.metadata.tags == ["noisy"]
+    assert "SHA-256 mismatch" in (result.error or "")
+    assert report.metrics.failure_reason_counts == {"corpus_integrity_error": 1}
 
 
 def test_build_metrics_counts_document_field_and_failure_accuracy() -> None:
