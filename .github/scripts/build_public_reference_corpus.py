@@ -124,6 +124,74 @@ SOURCES: list[dict[str, Any]] = [
                 "data.total": "6976.86"
             }
         }
+    },
+    {
+        "id": "hugofox-invoice-inv-23226",
+        "url": "https://www.castlesowerby-pc.gov.uk/shared/attachments.asp?f=f3beb9df-737a-4975-99e8-caf87453dab2.pdf&o=CSPC-meeting-agenda-260326.pdf",
+        "marker": "Hugofox Limited",
+        "supplier": "Hugofox Limited",
+        "layout_class": "embedded-xero-style-table",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "INV-23226",
+                "data.currency": "GBP",
+                "data.subtotal": "2.49",
+                "data.vat_amount": "0.50",
+                "data.total": "2.99"
+            }
+        }
+    },
+    {
+        "id": "rainfords-farm-invoice-inv-0011",
+        "url": "https://www.holmevalleyparishcouncil.gov.uk/wp-content/uploads/2025/02/2024-25-4.-Honley-Business-Association-1.-Christmas-Lights-and-2.-Christmas-Tree-Grant-Evaluation-Form.pdf",
+        "marker": "Rainford's Farm Limited",
+        "supplier": "Rainford's Farm Limited",
+        "layout_class": "embedded-xero-style-table",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "INV-0011",
+                "data.currency": "GBP",
+                "data.subtotal": "2080.00",
+                "data.vat_amount": "416.00",
+                "data.total": "2496.00"
+            }
+        }
+    },
+    {
+        "id": "mulberry-las-invoice-inv-1021",
+        "url": "https://isfieldparishcouncil.gov.uk/wp-content/uploads/2025/05/IPC-Finance-Report-April-2025.pdf",
+        "marker": "Mulberry Local Authority",
+        "supplier": "Mulberry Local Authority Services Limited",
+        "layout_class": "embedded-xero-style-table",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "INV-1021",
+                "data.currency": "GBP",
+                "data.subtotal": "210.00",
+                "data.vat_amount": "42.00",
+                "data.total": "252.00"
+            }
+        }
+    },
+    {
+        "id": "aa-salt-invoice-inv-7077",
+        "url": "https://tibbertonparishcouncil.gov.uk/wp-content/uploads/2025/03/Agenda-2025-03-13-Tibberton-Parish-Council-v.1.pdf",
+        "marker": "AA Salt Services",
+        "supplier": "AA Salt Services Limited",
+        "layout_class": "embedded-xero-style-table",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "INV-7077",
+                "data.currency": "GBP",
+                "data.subtotal": "180.00",
+                "data.vat_amount": "36.00",
+                "data.total": "216.00"
+            }
+        }
     }
 ]
 
