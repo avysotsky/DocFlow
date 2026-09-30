@@ -10,6 +10,7 @@ class SupplierInvoiceItem(BaseModel):
     quantity: Decimal
     unit: str | None = None
     unit_price: Decimal | None = None
+    discount_rate: Decimal | None = None
     line_total: Decimal | None = None
 
 
