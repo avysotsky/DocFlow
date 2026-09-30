@@ -84,6 +84,12 @@ jobs:
             exit 2
           fi
 
+          if ! jq -e '.documents[] | select(.id == "cargo-international-invoice-g59771")' \
+            /tmp/docflow-public-reference/manifest.json > /dev/null; then
+            echo "Cargo International German locale hard case must be admitted into the benchmark manifest."
+            exit 2
+          fi
+
       - name: Audit and benchmark public reference corpus
         id: benchmark
         working-directory: src/DocFlow.Extraction.Worker

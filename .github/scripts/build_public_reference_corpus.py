@@ -247,6 +247,28 @@ SOURCES: list[dict[str, Any]] = [
         }
     },
     {
+        "id": "cargo-international-invoice-g59771",
+        "url": "https://www.reklamation24.de/img/content/dateien/original_dzhuTDEzeDN3UWZNWXNoVGttRFBqdz09_1.pdf",
+        "marker": "G59771",
+        "supplier": "Cargo International GmbH",
+        "layout_class": "german-negative-amount-single-page",
+        "language": "de",
+        "tags": ["decimal-comma", "negative-amounts", "german-labels"],
+        "expected": {
+            "document_type": "supplier_invoice",
+            "validation_status": "incomplete",
+            "fields": {
+                "data.invoice_number": "G59771",
+                "data.invoice_date": "2024-06-04",
+                "data.currency": "EUR",
+                "data.subtotal": "-96.48",
+                "data.vat_rate": "19.00",
+                "data.vat_amount": "-18.33",
+                "data.total": "-114.81"
+            }
+        }
+    },
+    {
         "id": "jordan-customs-commercial-invoice-2019014782",
         "url": "https://tradeportal.customs.gov.jo/media/%D9%81%D8%A7%D8%AA%D9%88%D8%B1%D8%A9%20%D8%AA%D8%B5%D0%B4%D9%8A%D8%B1%D9%8A%D8%A9%20%D8%BA%D8%B0%D8%A7%D8%A6%D9%8A%D8%A9.pdf",
         "marker": "2019014782",
@@ -417,8 +439,13 @@ def build(output_root: Path) -> dict[str, Any]:
                         "supplier": source["supplier"],
                         "source_kind": "digital" if native_text_chars else "scanned",
                         "layout_class": source["layout_class"],
-                        "language": "en",
-                        "tags": ["public-reference", "original-layout", "runtime-download"]
+                        "language": source.get("language", "en"),
+                        "tags": [
+                            "public-reference",
+                            "original-layout",
+                            "runtime-download",
+                            *source.get("tags", []),
+                        ]
                     },
                     "document_type": "auto",
                     "expected": source["expected"]
