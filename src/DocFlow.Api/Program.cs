@@ -24,6 +24,19 @@ if (!Path.IsPathRooted(storageRoot))
 
 builder.Services.AddSingleton<IFileStorage>(new LocalFileStorage(storageRoot));
 
+var workerRoot = builder.Configuration["ExtractionWorker:RootPath"]
+    ?? "../DocFlow.Extraction.Worker";
+if (!Path.IsPathRooted(workerRoot))
+    workerRoot = Path.Combine(builder.Environment.ContentRootPath, workerRoot);
+
+var pythonExecutable = builder.Configuration["ExtractionWorker:PythonExecutable"];
+
+builder.Services.AddSingleton<IDocumentExtractionRunner>(
+    new PythonDocumentExtractionRunner(
+        workerRoot,
+        storageRoot,
+        pythonExecutable));
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
