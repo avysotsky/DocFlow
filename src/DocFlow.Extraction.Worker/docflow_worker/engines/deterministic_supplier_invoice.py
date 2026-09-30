@@ -33,14 +33,17 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
         invoice = SupplierInvoiceData(
             supplier_name=self._extract_supplier_name(content),
             invoice_number=(
-                extract_labeled_text_value(
-                    content,
-                    ("invoice number", "invoice no.", "invoice no"),
-                )
-                or self._metadata_value(
+                # Structured table metadata is more precise when both representations
+                # exist. Text-label extraction remains the fallback for borderless and
+                # public-reference invoices that do not expose a metadata table.
+                self._metadata_value(
                     metadata,
                     "invoice no",
                     "invoice number",
+                )
+                or extract_labeled_text_value(
+                    content,
+                    ("invoice number", "invoice no.", "invoice no"),
                 )
             ),
             invoice_date=self._parse_date(
