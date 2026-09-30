@@ -16,13 +16,16 @@ public sealed class DocumentsController : ControllerBase
 
     private readonly DocFlowDbContext _dbContext;
     private readonly IFileStorage _fileStorage;
+    private readonly IExtractionResultService _extractionResultService;
 
     public DocumentsController(
         DocFlowDbContext dbContext,
-        IFileStorage fileStorage)
+        IFileStorage fileStorage,
+        IExtractionResultService extractionResultService)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
+        _extractionResultService = extractionResultService;
     }
 
     [HttpGet("{id:guid}")]
@@ -133,41 +136,31 @@ public sealed class DocumentsController : ControllerBase
             confidence = parsedConfidence;
         }
 
-        var document = await _dbContext.Documents
-            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
-
-        if (document is null)
-            return NotFound();
-
-        var alreadyExists = await _dbContext.ExtractionResults
-            .AnyAsync(x => x.DocumentId == id, cancellationToken);
-
-        if (alreadyExists)
-            return Conflict("An extraction result already exists for this document.");
-
-        var extractionResult = new ExtractionResult(
+        var saveResult = await _extractionResultService.SaveAsync(
             id,
             request.GetRawText(),
+            documentType,
             confidence,
-            validationStatus);
+            validationStatus,
+            cancellationToken);
 
-        _dbContext.ExtractionResults.Add(extractionResult);
+        if (saveResult.Outcome == ExtractionResultSaveOutcome.DocumentNotFound)
+            return NotFound();
 
-        if (validationStatus == ValidationStatus.Valid)
-            document.MarkProcessed(documentType);
-        else
-            document.MarkNeedsReview(documentType);
+        if (saveResult.Outcome == ExtractionResultSaveOutcome.AlreadyExists)
+            return Conflict("An extraction result already exists for this document.");
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        var saved = saveResult.SavedResult
+            ?? throw new InvalidOperationException("The extraction result service returned no saved result.");
 
         var response = new SaveExtractionResultResponse(
-            extractionResult.Id,
-            extractionResult.DocumentId,
-            document.Status.ToString(),
-            document.DocumentType,
-            extractionResult.ValidationStatus.ToString(),
-            extractionResult.Confidence,
-            extractionResult.CreatedAt);
+            saved.Id,
+            saved.DocumentId,
+            saved.DocumentStatus.ToString(),
+            saved.DocumentType,
+            saved.ValidationStatus.ToString(),
+            saved.Confidence,
+            saved.CreatedAt);
 
         return StatusCode(StatusCodes.Status201Created, response);
     }
