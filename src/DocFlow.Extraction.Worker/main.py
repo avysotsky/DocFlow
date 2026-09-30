@@ -4,14 +4,7 @@ import json
 from pathlib import Path
 
 from docflow_worker import LocalStorageReader, PdfContentExtractor
-from docflow_worker.document_type_detector import detect_document_type
-from docflow_worker.engines import (
-    DeterministicSupplierInvoiceEngine,
-    DeterministicSupplierQuotationEngine,
-)
-from docflow_worker.supplier_invoice_models import SupplierInvoiceData
-from docflow_worker.supplier_quotation_models import SupplierQuotationData
-from docflow_worker.validators import SupplierInvoiceValidator, SupplierQuotationValidator
+from docflow_worker.structured_pipeline import extract_structured_document
 
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
@@ -122,35 +115,15 @@ def main() -> None:
 
     structured_result = None
     resolved_document_type = args.document_type
-    if resolved_document_type == "auto":
-        resolved_document_type = detect_document_type(content)
-
-    if resolved_document_type == "supplier_quotation":
+    if args.document_type:
         structured_result = asyncio.run(
-            DeterministicSupplierQuotationEngine().extract(
+            extract_structured_document(
                 content,
+                document_type=args.document_type,
                 document_name=args.storage_key,
             )
         )
-
-        quotation = SupplierQuotationData.model_validate(structured_result.data)
-        validation = SupplierQuotationValidator().validate(quotation)
-        structured_result.validation_status = validation.status
-        structured_result.validation = validation
-        structured_result.confidence = validation.confidence
-    elif resolved_document_type == "supplier_invoice":
-        structured_result = asyncio.run(
-            DeterministicSupplierInvoiceEngine().extract(
-                content,
-                document_name=args.storage_key,
-            )
-        )
-
-        invoice = SupplierInvoiceData.model_validate(structured_result.data)
-        validation = SupplierInvoiceValidator().validate(invoice)
-        structured_result.validation_status = validation.status
-        structured_result.validation = validation
-        structured_result.confidence = validation.confidence
+        resolved_document_type = structured_result.document_type
 
     output_structured_json_path = None
     if args.output_structured_json and structured_result is not None:
