@@ -1,6 +1,6 @@
 # DocFlow real-world benchmark corpus
 
-This directory contains the checked-in benchmark **format and instructions**, but not private supplier PDFs or local benchmark results.
+This directory contains the checked-in benchmark **format and instructions**, but not private supplier PDFs, local expected values or benchmark results.
 
 ## Local layout
 
@@ -13,12 +13,47 @@ benchmarks/
   corpus/                    # ignored; real supplier PDFs
     ...
   results/                   # ignored; generated reports
+    corpus-inventory.json
     benchmark-report.json
 ```
 
 The repository ignores `corpus/`, `results/` and `manifest.local.json` so supplier documents and expected business data are not pushed accidentally.
 
-## Manifest
+## Step 1 — inventory the private corpus
+
+Before creating expected values, scan the local PDF directory:
+
+```bash
+cd src/DocFlow.Extraction.Worker
+python corpus_inventory.py \
+  --corpus ../../benchmarks/corpus \
+  --output ../../benchmarks/results/corpus-inventory.json
+```
+
+The inventory does **not** extract quotation/invoice business fields. It records only corpus-level technical information:
+
+- relative PDF path;
+- stable suggested benchmark id;
+- SHA-256 digest;
+- file size;
+- page count;
+- number of pages containing native PDF text;
+- inferred source kind: `digital`, `scanned`, `mixed`, or `unknown`;
+- duplicate-content relationship;
+- PDF inspection errors.
+
+Use `--fail-on-duplicates` when duplicate PDF contents should make the command fail:
+
+```bash
+python corpus_inventory.py \
+  --corpus ../../benchmarks/corpus \
+  --output ../../benchmarks/results/corpus-inventory.json \
+  --fail-on-duplicates
+```
+
+The inventory exits non-zero when PDF inspection errors exist. With `--fail-on-duplicates`, duplicate contents also produce a non-zero exit code.
+
+## Step 2 — create the local manifest
 
 Copy the example:
 
@@ -26,14 +61,39 @@ Copy the example:
 cp benchmarks/manifest.example.json benchmarks/manifest.local.json
 ```
 
-Each document entry specifies:
+Each document entry can specify:
 
 - a stable benchmark `id`;
 - PDF path relative to the manifest file;
+- optional expected `sha256` copied from the corpus inventory;
+- optional corpus metadata;
 - `document_type`, normally `auto`;
 - expected document type;
 - optional expected validation status;
 - field expectations using dot paths.
+
+The optional metadata object supports:
+
+```json
+{
+  "supplier": "supplier-a",
+  "source_kind": "digital",
+  "layout_class": "multi-page-borderless",
+  "language": "en",
+  "tags": ["quotation", "vat", "purchase-order"]
+}
+```
+
+`source_kind` accepts:
+
+```text
+digital
+scanned
+mixed
+unknown
+```
+
+The benchmark verifies `sha256` before parsing the PDF. A changed/replaced file is reported as `corpus_integrity_error` rather than being silently benchmarked against stale expected values.
 
 Example field paths:
 
@@ -51,7 +111,7 @@ confidence
 
 Array indexes are numeric path segments.
 
-## Run
+## Step 3 — run the benchmark
 
 From `src/DocFlow.Extraction.Worker` after installing the worker environment:
 
@@ -78,6 +138,7 @@ The report contains:
 - `validation_status_accuracy`;
 - `field_accuracy`;
 - `failure_reason_counts` aggregated over the corpus;
+- per-document SHA-256 and metadata;
 - per-document OCR usage;
 - every expected/actual field comparison;
 - per-document `failure_reasons`;
@@ -86,6 +147,9 @@ The report contains:
 The benchmark classifies failures into these deterministic categories:
 
 ```text
+corpus_integrity_error
+  PDF SHA-256 differs from the manifest expectation
+
 processing_error
   the document could not be processed at all
 
@@ -102,7 +166,7 @@ field_mismatch
   an expected field exists but contains a different value
 ```
 
-One document can have several failure reasons at the same time. A processing error is terminal for that document and is reported only as `processing_error` because no structured result exists to compare.
+One document can have several semantic failure reasons at the same time. `processing_error` and `corpus_integrity_error` are terminal for that document because there is no trustworthy structured result to compare.
 
 The CLI exits with code `0` only when all benchmark documents pass. Any failed document produces exit code `1` while still writing the complete report.
 
@@ -113,15 +177,16 @@ For useful architectural evidence, the local corpus should contain supplier docu
 Useful dimensions to vary include:
 
 - quotation vs invoice;
-- digital text vs scan/OCR;
+- digital text vs scan/OCR vs mixed PDFs;
 - bordered vs borderless item tables;
 - single-page vs multi-page documents;
 - supplier template/layout;
+- language;
 - date and numeric formats;
 - tax/VAT presentation;
 - optional fields such as PO number, Incoterms and payment terms.
 
-Do not commit confidential supplier PDFs, expected business values or generated reports. Keep them under the ignored local corpus/manifest/results paths.
+Use anonymized supplier identifiers in `metadata.supplier` if the real supplier name itself is sensitive. Do not commit confidential supplier PDFs, expected business values or generated reports. Keep them under the ignored local corpus/manifest/results paths.
 
 ## Purpose
 
