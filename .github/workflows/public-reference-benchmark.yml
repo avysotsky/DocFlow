@@ -6,6 +6,7 @@ on:
       - 'DocFlow/v_1.1.1.5_RealCorpus'
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
+      - '.github/scripts/correct_public_reference_selection.py'
       - '.github/scripts/dump_public_reference_text.py'
       - '.github/scripts/dump_public_reference_processed_text.py'
       - '.github/workflows/public-reference-benchmark.yml'
@@ -49,6 +50,9 @@ jobs:
           python .github/scripts/build_public_reference_corpus.py \
             --output /tmp/docflow-public-reference \
             --min-documents 1
+
+          python .github/scripts/correct_public_reference_selection.py \
+            --root /tmp/docflow-public-reference
 
           python .github/scripts/dump_public_reference_text.py \
             --corpus /tmp/docflow-public-reference/corpus \
