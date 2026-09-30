@@ -7,7 +7,9 @@ import pytest
 
 from docflow_worker.benchmarking import (
     BenchmarkCaseResult,
+    BenchmarkMetadata,
     FieldComparison,
+    _build_breakdowns,
     _build_metrics,
     classify_failure_reasons,
     compare_expected_fields,
@@ -239,6 +241,8 @@ def test_run_benchmark_reports_corpus_integrity_error_before_pdf_processing(
     assert result.metadata.tags == ["noisy"]
     assert "SHA-256 mismatch" in (result.error or "")
     assert report.metrics.failure_reason_counts == {"corpus_integrity_error": 1}
+    assert report.breakdowns.by_supplier["Supplier A"].documents_failed == 1
+    assert report.breakdowns.by_source_kind["scanned"].documents_failed == 1
 
 
 def test_build_metrics_counts_document_field_and_failure_accuracy() -> None:
@@ -307,3 +311,72 @@ def test_build_metrics_counts_document_field_and_failure_accuracy() -> None:
         "processing_error": 1,
         "validation_status_mismatch": 1,
     }
+
+
+def test_build_breakdowns_groups_real_corpus_dimensions() -> None:
+    results = [
+        BenchmarkCaseResult(
+            id="supplier-a-ok",
+            file="a.pdf",
+            passed=True,
+            expected_document_type="supplier_quotation",
+            actual_document_type="supplier_quotation",
+            metadata=BenchmarkMetadata(
+                supplier="supplier-a",
+                source_kind="digital",
+                layout_class="borderless",
+                language="en",
+            ),
+        ),
+        BenchmarkCaseResult(
+            id="supplier-a-fail",
+            file="b.pdf",
+            passed=False,
+            expected_document_type="supplier_invoice",
+            actual_document_type="supplier_invoice",
+            metadata=BenchmarkMetadata(
+                supplier="supplier-a",
+                source_kind="scanned",
+                layout_class="table",
+                language="en",
+            ),
+            failure_reasons=["missing_field"],
+        ),
+        BenchmarkCaseResult(
+            id="supplier-b-ok",
+            file="c.pdf",
+            passed=True,
+            expected_document_type="supplier_invoice",
+            actual_document_type="supplier_invoice",
+            metadata=BenchmarkMetadata(
+                supplier="supplier-b",
+                source_kind="digital",
+                layout_class="table",
+                language="de",
+            ),
+        ),
+        BenchmarkCaseResult(
+            id="unspecified",
+            file="d.pdf",
+            passed=False,
+            expected_document_type="supplier_invoice",
+            metadata=BenchmarkMetadata(source_kind="unknown"),
+            failure_reasons=["processing_error"],
+        ),
+    ]
+
+    breakdowns = _build_breakdowns(results)
+
+    assert breakdowns.by_supplier["supplier-a"].documents_total == 2
+    assert breakdowns.by_supplier["supplier-a"].document_pass_rate == 0.5
+    assert breakdowns.by_supplier["supplier-b"].documents_total == 1
+    assert "unknown" not in breakdowns.by_supplier
+
+    assert breakdowns.by_source_kind["digital"].documents_total == 2
+    assert breakdowns.by_source_kind["scanned"].documents_total == 1
+    assert breakdowns.by_source_kind["unknown"].documents_total == 1
+
+    assert breakdowns.by_layout_class["table"].documents_total == 2
+    assert breakdowns.by_layout_class["borderless"].documents_total == 1
+    assert breakdowns.by_language["en"].documents_total == 2
+    assert breakdowns.by_language["de"].documents_total == 1
