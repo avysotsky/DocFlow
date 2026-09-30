@@ -54,14 +54,30 @@ def test_inventory_detects_duplicate_pdf_contents(tmp_path: Path) -> None:
     shutil.copyfile(original, duplicate)
 
     inventory = build_corpus_inventory(tmp_path)
-    by_file = {document.file: document for document in inventory.documents}
 
     assert inventory.documents_total == 2
     assert inventory.unique_contents == 1
     assert inventory.duplicates == 1
-    assert by_file["supplier-a.pdf"].duplicate_of is None
-    assert by_file["nested/supplier-a-copy.pdf"].duplicate_of == by_file["supplier-a.pdf"].suggested_id
-    assert by_file["nested/supplier-a-copy.pdf"].sha256 == by_file["supplier-a.pdf"].sha256
+
+    canonical_documents = [
+        document for document in inventory.documents if document.duplicate_of is None
+    ]
+    duplicate_documents = [
+        document for document in inventory.documents if document.duplicate_of is not None
+    ]
+
+    assert len(canonical_documents) == 1
+    assert len(duplicate_documents) == 1
+
+    canonical = canonical_documents[0]
+    duplicate_entry = duplicate_documents[0]
+
+    assert duplicate_entry.duplicate_of == canonical.suggested_id
+    assert duplicate_entry.sha256 == canonical.sha256
+    assert {canonical.file, duplicate_entry.file} == {
+        "supplier-a.pdf",
+        "nested/supplier-a-copy.pdf",
+    }
 
 
 def test_inventory_records_invalid_pdf_without_aborting(tmp_path: Path) -> None:
