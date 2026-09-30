@@ -29,6 +29,15 @@ jobs:
           cache: 'pip'
           cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
 
+      - name: Install Tesseract OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+          tessdata_dir=$(dirname "$(dpkg -L tesseract-ocr-eng | grep '/eng.traineddata$' | head -n 1)")
+          test -n "$tessdata_dir"
+          echo "TESSDATA_PREFIX=$tessdata_dir" >> "$GITHUB_ENV"
+          tesseract --version
+
       - name: Install Python worker
         working-directory: src/DocFlow.Extraction.Worker
         run: python -m pip install -e ".[dev]"
@@ -64,8 +73,7 @@ jobs:
           python real_corpus.py \
             --corpus /tmp/docflow-public-reference/corpus \
             --manifest /tmp/docflow-public-reference/manifest.json \
-            --results /tmp/docflow-public-reference/results \
-            --disable-ocr
+            --results /tmp/docflow-public-reference/results
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
