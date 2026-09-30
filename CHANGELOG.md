@@ -2,6 +2,109 @@
 
 All notable changes to DocFlow are documented in this file.
 
+## [1.1.1.3] - 2026-09-30
+
+Controlled robustness milestone for supplier documents.
+
+### Added
+
+- Borderless digital supplier quotation extraction fallback using layout-preserved multi-column text when explicit line tables are absent.
+- Supplier invoice semantic model, deterministic extraction engine and arithmetic validator.
+- Deterministic automatic document-type detection for:
+  - `supplier_quotation`
+  - `supplier_invoice`
+- Python CLI `--document-type auto` support.
+- .NET Python runner automatic type detection instead of hard-coded quotation processing.
+- Conditional OCR for pages with no native PDF text through PyMuPDF/Tesseract integration.
+- OCR CLI controls:
+  - `--disable-ocr`
+  - `--ocr-language`
+  - `--ocr-dpi`
+  - `--tessdata`
+- OCR tracking in `PageContent` / `DocumentContent`.
+- Dedicated scanned-PDF OCR E2E workflow with Tesseract installed in CI.
+- Compressed image-only PDF fixture generation for scan testing.
+- Supplier item-header alias recognition for layouts such as:
+  - `Part No.`
+  - `Item Description`
+  - `Quantity`
+  - `UOM`
+  - `Price`
+  - `Amount`
+- Version-branch CI matching `DocFlow/v_*`.
+
+### Changed
+
+- `PythonDocumentExtractionRunner` now invokes the worker with `--document-type auto`.
+- The generic PDF extraction path remains fast for native-text PDFs; OCR is only attempted on pages without extractable text.
+- Supplier item-table detection now uses the same header aliases as the item parser instead of requiring literal `SKU / Description / Qty`.
+
+### Verified
+
+The full automatic pipeline was verified for:
+
+1. bordered supplier quotation;
+2. borderless supplier quotation;
+3. supplier invoice;
+4. repeated enqueue/idempotency;
+5. arithmetic mismatch routing to `NeedsReview`;
+6. technical extraction failure routing to `Failed`;
+7. an image-only scanned supplier quotation processed through Tesseract OCR.
+
+The controlled quotation/invoice fixtures preserve the verified arithmetic baseline:
+
+```text
+Subtotal: 1457.00 EUR
+VAT 20%: 291.40 EUR
+Total: 1748.40 EUR
+Items: 5
+Validation: Valid
+Confidence: 1.0
+```
+
+The supplier invoice fixture additionally verifies:
+
+```text
+Invoice No: INV-2026-091
+Invoice Date: 2026-09-30
+Due Date: 2026-10-30
+PO No: PO-78421
+```
+
+The final implementation head before documentation passed:
+
+- Python Worker CI;
+- Automation E2E;
+- Scanned OCR E2E.
+
+### Architectural decisions
+
+- .NET remains responsible for orchestration and PostgreSQL persistence.
+- Python remains an extraction/validation worker and does not write directly to PostgreSQL.
+- OCR is conditional rather than part of every PDF processing request.
+- Borderless-table fallback is kept inside supplier semantic extraction rather than making the generic PDF table detector aggressively guess arbitrary tables.
+- ONNX/LLM fallback is deferred until measured real-world failures justify it.
+
+### Known limitation
+
+This milestone validates controlled generated PDFs representing several layout classes. It does not yet provide a statistically meaningful benchmark over real third-party supplier documents, noisy scans, multilingual documents, multi-page tables, complex taxes/discounts, or irregular production templates.
+
+### Development handoff
+
+Completed-state handoff:
+
+```text
+docs/HANDOFF_v1.1.1.3_COMPLETED.md
+```
+
+The recommended next milestone is real-world benchmarking/corpus infrastructure on:
+
+```text
+DocFlow/v_1.1.1.4_Benchmarking
+```
+
+The objective is to measure the current deterministic+OCR pipeline before deciding where rules, ONNX or LLM fallback is actually required.
+
 ## [1.1.1.2] - 2026-09-30
 
 Automatic background processing milestone for the already verified supplier quotation pipeline.
