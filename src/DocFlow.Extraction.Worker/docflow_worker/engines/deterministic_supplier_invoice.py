@@ -252,7 +252,10 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
                     )
 
             if item is None:
-                item = cls._extract_right_aligned_invoice_item(row)
+                item = cls._extract_right_aligned_invoice_item(
+                    row,
+                    discount_expected=discount_index is not None,
+                )
 
             if item is not None:
                 items.append(item)
@@ -263,6 +266,8 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
     def _extract_right_aligned_invoice_item(
         cls,
         row: list[str | None],
+        *,
+        discount_expected: bool = False,
     ) -> SupplierInvoiceItem | None:
         cells = [cls._clean_cell(value) for value in row]
         if len(cells) < 4:
@@ -286,7 +291,11 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
 
         quantity = cls._parse_decimal(cells[quantity_index])
         unit_price = cls._parse_decimal(cells[unit_price_index])
-        discount_rate = cls._parse_decimal(cells[percent_index].replace("%", ""))
+        discount_rate = (
+            cls._parse_decimal(cells[percent_index].replace("%", ""))
+            if discount_expected
+            else None
+        )
         line_total = cls._parse_decimal(cells[line_total_index])
         if quantity is None or unit_price is None or line_total is None:
             return None
