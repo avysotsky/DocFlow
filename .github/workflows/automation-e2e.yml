@@ -73,7 +73,7 @@ jobs:
       - name: Generate synthetic supplier quotations
         run: |
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/supplier-quotation.pdf
-          python .github/scripts/generate_supplier_quotation_pdf.py /tmp/invalid-supplier-quotation.pdf 1748.41
+          python .github/scripts/generate_supplier_quotation_pdf.py /tmp/invalid-supplier-quotation.pdf 1748.42
 
       - name: Verify automated processing scenarios
         env:
@@ -201,7 +201,7 @@ jobs:
           printf '%s' "$invalid_result_json" | jq -e '
             .validationStatus == "Invalid"
             and .structuredData.validation_status == "invalid"
-            and .structuredData.data.total == "1748.41"
+            and .structuredData.data.total == "1748.42"
             and .structuredData.validation.checks.grand_total.status == "failed"
           ' >/dev/null
 
