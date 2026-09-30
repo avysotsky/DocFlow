@@ -129,6 +129,24 @@ jobs:
               ]
             }' > /tmp/docflow-benchmark/manifest.json
 
+      - name: Audit corpus and manifest
+        working-directory: src/DocFlow.Extraction.Worker
+        run: |
+          python corpus_audit.py \
+            --inventory /tmp/docflow-benchmark/corpus-inventory.json \
+            --manifest /tmp/docflow-benchmark/manifest.json \
+            --output /tmp/docflow-benchmark/corpus-audit.json
+
+          jq -e '
+            .errors == 0
+            and .warnings == 1
+            and .inventory_documents == 3
+            and .inventory_unique_contents == 2
+            and .manifest_documents == 2
+            and .represented_unique_contents == 2
+            and ([.issues[] | select(.code == "duplicate_content_present")] | length) == 1
+          ' /tmp/docflow-benchmark/corpus-audit.json >/dev/null
+
       - name: Run benchmark CLI
         working-directory: src/DocFlow.Extraction.Worker
         run: |
@@ -157,4 +175,4 @@ jobs:
             and ([.documents[].file_sha256] | all(length == 64))
           ' /tmp/docflow-benchmark/report.json >/dev/null
 
-          echo "Benchmark inventory + smoke passed."
+          echo "Corpus inventory + audit + benchmark smoke passed."
