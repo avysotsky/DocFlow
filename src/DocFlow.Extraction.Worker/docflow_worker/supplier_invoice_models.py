@@ -23,6 +23,7 @@ class SupplierInvoiceData(BaseModel):
     customer_reference: str | None = None
     purchase_order_number: str | None = None
     items: list[SupplierInvoiceItem] = Field(default_factory=list)
+    discount_amount: Decimal | None = None
     subtotal: Decimal | None = None
     vat_rate: Decimal | None = None
     vat_amount: Decimal | None = None
