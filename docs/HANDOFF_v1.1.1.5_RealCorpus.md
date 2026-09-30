@@ -1,6 +1,6 @@
 # DocFlow — active handoff for version 1.1.1.5 RealCorpus
 
-Status: **ACTIVE — infrastructure ready, real corpus not yet evaluated**  
+Status: **ACTIVE — tooling ready, real supplier corpus not yet evaluated**  
 Working branch: `DocFlow/v_1.1.1.5_RealCorpus`  
 Started from completed milestone: `DocFlow/v_1.1.1.4_Benchmarking`
 
@@ -10,7 +10,7 @@ Version 1.1.1.5 exists to replace synthetic-only confidence with measured eviden
 
 This milestone must **not** be marked completed until a real corpus and independently recorded ground truth have been evaluated.
 
-The target evidence is:
+Target evidence:
 
 ```text
 private supplier PDFs
@@ -60,16 +60,7 @@ CLI:
 src/DocFlow.Extraction.Worker/corpus_inventory.py
 ```
 
-Run:
-
-```bash
-cd src/DocFlow.Extraction.Worker
-python corpus_inventory.py \
-  --corpus ../../benchmarks/corpus \
-  --output ../../benchmarks/results/corpus-inventory.json
-```
-
-Inventory records only technical corpus metadata, not supplier business fields:
+Inventory records technical corpus metadata only:
 
 - corpus root;
 - relative path;
@@ -98,7 +89,7 @@ Local working manifest:
 benchmarks/manifest.local.json
 ```
 
-Real-corpus entries support:
+Entries support:
 
 ```json
 {
@@ -131,15 +122,13 @@ Ground truth must be read independently from the source PDF. Do not copy DocFlow
 
 The benchmark verifies the actual PDF digest before parsing it.
 
-If the manifest pins one SHA and the local file has another, the case becomes:
+A manifest/file mismatch becomes:
 
 ```text
 corpus_integrity_error
 ```
 
-and extraction is skipped for that document.
-
-This prevents accidentally benchmarking a replaced/edited PDF against stale expected values.
+and extraction is skipped for that case.
 
 ## 6. Corpus audit
 
@@ -153,15 +142,6 @@ CLI:
 
 ```text
 src/DocFlow.Extraction.Worker/corpus_audit.py
-```
-
-Run:
-
-```bash
-python corpus_audit.py \
-  --inventory ../../benchmarks/results/corpus-inventory.json \
-  --manifest ../../benchmarks/manifest.local.json \
-  --output ../../benchmarks/results/corpus-audit.json
 ```
 
 The audit works by **unique PDF content SHA**, not by a filename selected as a canonical copy.
@@ -193,18 +173,10 @@ Audit warnings include:
 
 ## 7. Benchmark report
 
-Existing benchmark CLI:
+Benchmark CLI:
 
 ```text
 src/DocFlow.Extraction.Worker/benchmark.py
-```
-
-Run after audit:
-
-```bash
-python benchmark.py \
-  --manifest ../../benchmarks/manifest.local.json \
-  --output ../../benchmarks/results/benchmark-report.json
 ```
 
 Overall metrics:
@@ -228,9 +200,7 @@ missing_field
 field_mismatch
 ```
 
-## 8. Grouped real-world metrics
-
-The report now also contains the same metrics grouped by:
+Grouped metrics:
 
 ```text
 breakdowns.by_supplier
@@ -239,70 +209,111 @@ breakdowns.by_layout_class
 breakdowns.by_language
 ```
 
-This is required for architectural analysis. An overall percentage alone cannot distinguish, for example:
+The grouped metrics are required to distinguish systematic failure classes such as OCR failures, one supplier template, one layout type or one language.
 
-- digital success vs OCR failure;
-- one problematic supplier template;
-- one layout class causing missing fields;
-- one language causing type-detection/extraction failures.
+## 8. Unified local runner
+
+User-facing entry point:
+
+```text
+src/DocFlow.Extraction.Worker/real_corpus.py
+```
+
+Once `manifest.local.json` contains independently recorded ground truth, the complete workflow can be run with one command:
+
+```bash
+cd src/DocFlow.Extraction.Worker
+python real_corpus.py \
+  --corpus ../../benchmarks/corpus \
+  --manifest ../../benchmarks/manifest.local.json \
+  --results ../../benchmarks/results
+```
+
+The runner performs:
+
+```text
+inventory
+  ↓
+write corpus-inventory.json
+  ↓
+stop if PDF inspection errors exist
+  ↓
+audit manifest against inventory
+  ↓
+write corpus-audit.json
+  ↓
+stop if audit errors exist
+  ↓
+benchmark current deterministic + OCR pipeline
+  ↓
+write benchmark-report.json
+```
+
+Options include:
+
+```text
+--fail-on-warnings
+--disable-ocr
+--ocr-language
+--ocr-dpi
+--tessdata
+```
+
+Exit behavior:
+
+```text
+0  benchmark completed and every case passed
+1  benchmark completed with failed cases
+2  inventory contained PDF inspection errors
+3  audit blocked the benchmark
+```
+
+The individual `corpus_inventory.py`, `corpus_audit.py` and `benchmark.py` CLIs remain available for diagnostics.
 
 ## 9. CI state
 
 The real-corpus tooling is covered by unit tests and synthetic smoke CI.
 
-Verified after the content-hash audit semantics were finalized:
-
-### Python Worker CI
+Verified after content-hash audit semantics were finalized:
 
 ```text
-compile: success
-pytest: success
-```
-
-### Benchmark Smoke
-
-The workflow executes:
-
-```text
-generate synthetic quotation/invoice + duplicate
-        ↓
-corpus_inventory.py
-        ↓
-manifest built from inventory SHA values
-        ↓
-corpus_audit.py
-        ↓
-benchmark.py
-        ↓
-verify overall metrics + metadata breakdowns
-```
-
-Result: **success**.
-
-### Regression E2E
-
-Also verified after the corpus changes:
-
-```text
+Python Worker CI: success
+Benchmark Smoke: success
 Automation E2E: success
 Scanned OCR E2E: success
 ```
 
-Therefore the corpus tooling has not broken the existing upload/background/OCR production path.
+Benchmark Smoke covers the same stages expected locally:
+
+```text
+generate quotation/invoice + duplicate copy
+        ↓
+inventory
+        ↓
+manifest pinned to inventory SHA values
+        ↓
+audit
+        ↓
+benchmark
+        ↓
+verify overall metrics + metadata breakdowns
+```
+
+The smoke workflow has also been updated to execute the unified `real_corpus.py` entry point directly.
 
 ## 10. Required real input before this milestone can close
 
-The repository now has enough tooling to run the real benchmark. The missing input is external evidence:
+The remaining dependency is external evidence:
 
 1. representative real supplier quotation/invoice PDFs;
-2. one manifest case per unique document content SHA;
+2. one manifest case per unique content SHA;
 3. independently transcribed expected fields;
 4. useful metadata (`supplier`, `source_kind`, `layout_class`, `language`);
-5. Tesseract language data for any scanned non-English documents.
+5. Tesseract language data for scanned non-English documents.
 
-A useful first batch should prefer **diversity over volume**. Ten different supplier/layout combinations are more informative than fifty copies of one template.
+A useful first batch should prefer **diversity over volume**.
 
-Suggested initial corpus target:
+Suggested initial target:
 
 ```text
 10–20 unique documents
@@ -344,19 +355,16 @@ Populate locally:
 benchmarks/corpus/
 ```
 
-Then run:
+Run `corpus_inventory.py` once to obtain SHA values/source kinds, enter independent ground truth in `manifest.local.json`, then use:
 
-```text
-corpus_inventory.py
-        ↓
-create/edit manifest.local.json with independent ground truth
-        ↓
-corpus_audit.py
-        ↓
-benchmark.py
+```bash
+python real_corpus.py \
+  --corpus ../../benchmarks/corpus \
+  --manifest ../../benchmarks/manifest.local.json \
+  --results ../../benchmarks/results
 ```
 
-After the resulting `corpus-inventory.json`, `corpus-audit.json` and `benchmark-report.json` are available, analysis should focus on measured failure clusters rather than adding new extraction technology speculatively.
+After `corpus-inventory.json`, `corpus-audit.json` and `benchmark-report.json` exist, analyze measured failure clusters rather than adding extraction technology speculatively.
 
 ---
 
