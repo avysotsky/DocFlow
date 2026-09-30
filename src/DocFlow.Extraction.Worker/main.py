@@ -2,12 +2,12 @@ import argparse
 import json
 from pathlib import Path
 
-from docflow_worker import LocalStorageReader, PdfTextExtractor
+from docflow_worker import LocalStorageReader, PdfContentExtractor
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Extract embedded text from a PDF stored by DocFlow."
+        description="Extract layout-aware content from a PDF stored by DocFlow."
     )
     parser.add_argument(
         "--storage-root",
@@ -21,7 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-text",
-        help="Optional path where extracted UTF-8 text will be written.",
+        help="Optional path where extracted UTF-8 plain text will be written.",
+    )
+    parser.add_argument(
+        "--output-json",
+        help="Optional path where full layout-aware DocumentContent JSON will be written.",
     )
     return parser
 
@@ -31,21 +35,30 @@ def main() -> None:
 
     storage = LocalStorageReader(args.storage_root)
     pdf_path = storage.resolve(args.storage_key)
-    result = PdfTextExtractor().extract(pdf_path)
+    content = PdfContentExtractor().extract(pdf_path)
 
     if args.output_text:
         output_path = Path(args.output_text)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(result.text, encoding="utf-8")
+        output_path.write_text(content.text, encoding="utf-8")
+
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content.model_dump_json(indent=2), encoding="utf-8")
 
     summary = {
         "storageKey": args.storage_key,
-        "pageCount": result.page_count,
-        "pagesWithText": result.pages_with_text,
-        "emptyPageNumbers": result.empty_page_numbers,
-        "needsOcr": result.needs_ocr,
-        "textLength": len(result.text),
+        "pageCount": content.page_count,
+        "pagesWithText": content.pages_with_text,
+        "emptyPageNumbers": content.empty_page_numbers,
+        "needsOcr": content.needs_ocr,
+        "textLength": len(content.text),
+        "wordCount": sum(len(page.words) for page in content.pages),
+        "blockCount": sum(len(page.blocks) for page in content.pages),
+        "tableCount": content.table_count,
         "outputText": args.output_text,
+        "outputJson": args.output_json,
     }
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
