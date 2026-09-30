@@ -9,6 +9,9 @@ from docflow_worker.supplier_quotation_models import SupplierQuotationData
 from docflow_worker.validators import SupplierQuotationValidator
 
 
+OUTPUT_DIR = Path(__file__).resolve().parent / "output"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Extract layout-aware content from a PDF stored by DocFlow."
@@ -25,11 +28,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-text",
-        help="Optional path where extracted UTF-8 plain text will be written.",
+        help=(
+            "Optional path where extracted UTF-8 plain text will be written. "
+            "A simple file name is written under the worker output directory."
+        ),
     )
     parser.add_argument(
         "--output-json",
-        help="Optional path where full layout-aware DocumentContent JSON will be written.",
+        help=(
+            "Optional path where full layout-aware DocumentContent JSON will be written. "
+            "A simple file name is written under the worker output directory."
+        ),
     )
     parser.add_argument(
         "--document-type",
@@ -38,9 +47,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-structured-json",
-        help="Optional path where StructuredExtractionResult JSON will be written.",
+        help=(
+            "Optional path where StructuredExtractionResult JSON will be written. "
+            "A simple file name is written under the worker output directory."
+        ),
     )
     return parser
+
+
+def resolve_output_path(value: str) -> Path:
+    path = Path(value)
+
+    if path.is_absolute() or path.parent != Path("."):
+        return path
+
+    return OUTPUT_DIR / path.name
 
 
 def main() -> None:
@@ -54,15 +75,17 @@ def main() -> None:
     pdf_path = storage.resolve(args.storage_key)
     content = PdfContentExtractor().extract(pdf_path)
 
+    output_text_path = None
     if args.output_text:
-        output_path = Path(args.output_text)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content.text, encoding="utf-8")
+        output_text_path = resolve_output_path(args.output_text)
+        output_text_path.parent.mkdir(parents=True, exist_ok=True)
+        output_text_path.write_text(content.text, encoding="utf-8")
 
+    output_json_path = None
     if args.output_json:
-        output_path = Path(args.output_json)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content.model_dump_json(indent=2), encoding="utf-8")
+        output_json_path = resolve_output_path(args.output_json)
+        output_json_path.parent.mkdir(parents=True, exist_ok=True)
+        output_json_path.write_text(content.model_dump_json(indent=2), encoding="utf-8")
 
     structured_result = None
     if args.document_type == "supplier_quotation":
@@ -79,10 +102,11 @@ def main() -> None:
         structured_result.validation = validation
         structured_result.confidence = validation.confidence
 
+    output_structured_json_path = None
     if args.output_structured_json and structured_result is not None:
-        output_path = Path(args.output_structured_json)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
+        output_structured_json_path = resolve_output_path(args.output_structured_json)
+        output_structured_json_path.parent.mkdir(parents=True, exist_ok=True)
+        output_structured_json_path.write_text(
             structured_result.model_dump_json(indent=2),
             encoding="utf-8",
         )
@@ -97,8 +121,8 @@ def main() -> None:
         "wordCount": sum(len(page.words) for page in content.pages),
         "blockCount": sum(len(page.blocks) for page in content.pages),
         "tableCount": content.table_count,
-        "outputText": args.output_text,
-        "outputJson": args.output_json,
+        "outputText": str(output_text_path) if output_text_path else None,
+        "outputJson": str(output_json_path) if output_json_path else None,
         "structuredEngine": (
             structured_result.engine if structured_result is not None else None
         ),
@@ -111,7 +135,9 @@ def main() -> None:
         "confidence": (
             structured_result.confidence if structured_result is not None else None
         ),
-        "outputStructuredJson": args.output_structured_json,
+        "outputStructuredJson": (
+            str(output_structured_json_path) if output_structured_json_path else None
+        ),
     }
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
