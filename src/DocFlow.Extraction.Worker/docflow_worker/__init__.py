@@ -1,8 +1,21 @@
-from .pdf_text_extractor import PdfTextExtractionResult, PdfTextExtractor
+from .models import (
+    BoundingBox,
+    DocumentContent,
+    PageContent,
+    TableContent,
+    TextBlockContent,
+    WordContent,
+)
+from .pdf_content_extractor import PdfContentExtractor
 from .storage import LocalStorageReader
 
 __all__ = [
+    "BoundingBox",
+    "DocumentContent",
     "LocalStorageReader",
-    "PdfTextExtractionResult",
-    "PdfTextExtractor",
+    "PageContent",
+    "PdfContentExtractor",
+    "TableContent",
+    "TextBlockContent",
+    "WordContent",
 ]
