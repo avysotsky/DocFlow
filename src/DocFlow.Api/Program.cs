@@ -17,6 +17,7 @@ builder.Services.AddDbContext<DocFlowDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
+builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
 if (!Path.IsPathRooted(storageRoot))
