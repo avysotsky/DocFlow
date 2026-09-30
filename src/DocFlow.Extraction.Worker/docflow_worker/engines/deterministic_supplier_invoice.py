@@ -7,6 +7,11 @@ from docflow_worker.engines.deterministic_supplier_quotation import (
     DeterministicSupplierQuotationEngine,
 )
 from docflow_worker.invoice_identifiers import normalize_invoice_identifier
+from docflow_worker.invoice_text_fallbacks import (
+    extract_ocr_invoice_identifier,
+    extract_preferred_invoice_total,
+    infer_labeled_currency,
+)
 from docflow_worker.models import DocumentContent, StructuredExtractionResult
 from docflow_worker.supplier_invoice_models import (
     SupplierInvoiceData,
@@ -31,13 +36,17 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
         item_table = self._find_item_table(content)
         quotation_items = self._extract_items(item_table) if item_table else []
 
-        invoice_number = extract_labeled_identifier(
-            content,
-            ("invoice number", "invoice no.", "invoice no"),
-        ) or self._metadata_value(
-            metadata,
-            "invoice no",
-            "invoice number",
+        invoice_number = (
+            extract_labeled_identifier(
+                content,
+                ("invoice number", "invoice no.", "invoice no"),
+            )
+            or extract_ocr_invoice_identifier(content)
+            or self._metadata_value(
+                metadata,
+                "invoice no",
+                "invoice number",
+            )
         )
 
         invoice = SupplierInvoiceData(
@@ -51,6 +60,7 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
             ),
             currency=(
                 self._metadata_value(metadata, "currency")
+                or infer_labeled_currency(content)
                 or infer_currency(content)
             ),
             customer_reference=self._metadata_value(
@@ -116,7 +126,10 @@ class DeterministicSupplierInvoiceEngine(DeterministicSupplierQuotationEngine):
         invoice.subtotal = totals["subtotal"]
         invoice.vat_rate = totals["vat_rate"]
         invoice.vat_amount = totals["vat_amount"]
-        invoice.total = totals["total"]
+        invoice.total = (
+            extract_preferred_invoice_total(content, cls._parse_decimal)
+            or totals["total"]
+        )
 
         for page in content.pages:
             for block in page.blocks:
