@@ -85,6 +85,7 @@ jobs:
             --project src/DocFlow.Api/DocFlow.Api.csproj \
             --configuration Release \
             --no-build \
+            --no-launch-profile \
             > /tmp/docflow-api.log 2>&1 &
           api_pid=$!
 
