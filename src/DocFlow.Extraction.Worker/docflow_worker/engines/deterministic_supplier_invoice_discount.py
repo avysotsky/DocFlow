@@ -1,5 +1,5 @@
 import re
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from docflow_worker.engines.deterministic_supplier_invoice import (
     DeterministicSupplierInvoiceEngine,
@@ -12,7 +12,7 @@ from docflow_worker.supplier_invoice_models import (
 
 
 class DeterministicSupplierInvoiceDiscountEngine(DeterministicSupplierInvoiceEngine):
-    """Invoice parser extension for explicit invoice-level discounts and legacy OCR rows."""
+    """Invoice parser extension for explicit discounts, locale fallbacks and legacy OCR rows."""
 
     _money_quantum = Decimal("0.01")
 
@@ -29,9 +29,12 @@ class DeterministicSupplierInvoiceDiscountEngine(DeterministicSupplierInvoiceEng
         result = await super().extract(content, document_name=document_name)
         invoice = SupplierInvoiceData.model_validate(result.data)
 
+        self._apply_german_invoice_fallbacks(content.text, invoice)
+
         discount_amount = self._extract_document_discount(content.text)
         if discount_amount is None:
             result.engine = self.name
+            result.data = invoice.model_dump()
             return result
 
         invoice.discount_amount = discount_amount
@@ -61,6 +64,106 @@ class DeterministicSupplierInvoiceDiscountEngine(DeterministicSupplierInvoiceEng
         result.engine = self.name
         result.data = invoice.model_dump()
         return result
+
+    @classmethod
+    def _apply_german_invoice_fallbacks(
+        cls,
+        text: str,
+        invoice: SupplierInvoiceData,
+    ) -> None:
+        """Recover common German invoice labels and summary arithmetic.
+
+        This path is activated only for text that contains German invoice vocabulary.
+        It complements the existing English parser; it does not replace fields on
+        unrelated documents.
+        """
+        if not re.search(
+            r"\b(?:Rechnung|Rechnungsnummer|Rechnungsdatum|Rechnungsbetrag)\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return
+
+        if invoice.invoice_number is None:
+            value = cls._german_labeled_value(text, "Rechnungsnummer")
+            if value:
+                invoice.invoice_number = value
+
+        if invoice.invoice_date is None:
+            value = cls._german_labeled_value(text, "Rechnungsdatum")
+            if value:
+                invoice.invoice_date = cls._parse_date(value)
+
+        if invoice.due_date is None:
+            value = cls._german_labeled_value(text, "Zahlungsziel")
+            if value:
+                invoice.due_date = cls._parse_date(value)
+
+        # Common German summary table:
+        # Gesamt: Netto | MwSt. | MwSt. in % | Brutto
+        #         -96,48 | -18,33 | 19,00 | -114,81
+        normalized = " ".join(text.split())
+        summary = re.search(
+            r"\bGesamt\s*:\s*Netto\s+MwSt\.?\s+MwSt\.?\s+in\s+%\s+Brutto\s+"
+            r"(?P<subtotal>[-+]?\d[\d.,]*)\s+"
+            r"(?P<vat_amount>[-+]?\d[\d.,]*)\s+"
+            r"(?P<vat_rate>[-+]?\d[\d.,]*)\s+"
+            r"(?P<total>[-+]?\d[\d.,]*)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if summary is not None:
+            subtotal = cls._parse_locale_decimal(summary.group("subtotal"))
+            vat_amount = cls._parse_locale_decimal(summary.group("vat_amount"))
+            vat_rate = cls._parse_locale_decimal(summary.group("vat_rate"))
+            total = cls._parse_locale_decimal(summary.group("total"))
+
+            if subtotal is not None:
+                invoice.subtotal = subtotal
+            if vat_amount is not None:
+                invoice.vat_amount = vat_amount
+            if vat_rate is not None:
+                invoice.vat_rate = vat_rate
+            if total is not None:
+                invoice.total = total
+        elif invoice.total is None:
+            value = cls._german_labeled_value(text, "Rechnungsbetrag")
+            total = cls._parse_locale_decimal(value)
+            if total is not None:
+                invoice.total = total
+
+    @staticmethod
+    def _german_labeled_value(text: str, label: str) -> str | None:
+        match = re.search(
+            rf"\b{re.escape(label)}\s*:\s*(?P<value>[^\s]+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return None
+        return match.group("value").strip()
+
+    @staticmethod
+    def _parse_locale_decimal(value: str | None) -> Decimal | None:
+        if not value:
+            return None
+
+        compact = re.sub(r"[^0-9,.+\-]", "", value)
+        if not compact:
+            return None
+
+        if "," in compact and "." in compact:
+            if compact.rfind(",") > compact.rfind("."):
+                compact = compact.replace(".", "").replace(",", ".")
+            else:
+                compact = compact.replace(",", "")
+        elif "," in compact:
+            compact = compact.replace(",", ".")
+
+        try:
+            return Decimal(compact)
+        except InvalidOperation:
+            return None
 
     @classmethod
     def _extract_document_discount(cls, text: str) -> Decimal | None:

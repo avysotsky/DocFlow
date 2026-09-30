@@ -14,6 +14,20 @@ def detect_document_type(content: DocumentContent) -> str:
     if "proforma invoice" in text or "pro-forma invoice" in text:
         return "supplier_invoice"
 
+    # German supplier invoices use a different vocabulary but retain strong,
+    # deterministic business labels. Require at least two invoice-specific markers
+    # together with the document title so prose mentioning a Rechnung does not become
+    # a false positive.
+    german_invoice_markers = (
+        "rechnungsnummer",
+        "rechnungsdatum",
+        "rechnungsbetrag",
+        "zahlungsziel",
+    )
+    german_invoice_score = sum(marker in text for marker in german_invoice_markers)
+    if german_invoice_score >= 2 and "rechnung" in text:
+        return "supplier_invoice"
+
     quotation_markers = (
         "quotation no",
         "quotation number",
