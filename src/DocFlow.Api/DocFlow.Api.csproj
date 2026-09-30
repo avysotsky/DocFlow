@@ -3,6 +3,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>d9323bfd-5c9c-46b2-8156-2a1c6fb519b1</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\DocFlow.Application\DocFlow.Application.csproj" />
