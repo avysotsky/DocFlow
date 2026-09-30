@@ -11,6 +11,7 @@ on:
       - 'src/DocFlow.Infrastructure/**'
       - 'src/DocFlow.Extraction.Worker/**'
       - '.github/scripts/generate_supplier_quotation_pdf.py'
+      - '.github/scripts/generate_supplier_invoice_pdf.py'
       - '.github/workflows/automation-e2e.yml'
   workflow_dispatch:
 
@@ -70,11 +71,12 @@ jobs:
             --project src/DocFlow.Infrastructure/DocFlow.Infrastructure.csproj \
             --startup-project src/DocFlow.Api/DocFlow.Api.csproj
 
-      - name: Generate synthetic supplier quotations
+      - name: Generate synthetic supplier documents
         run: |
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/supplier-quotation.pdf
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/invalid-supplier-quotation.pdf 1748.42
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/borderless-supplier-quotation.pdf --borderless
+          python .github/scripts/generate_supplier_invoice_pdf.py /tmp/supplier-invoice.pdf
 
       - name: Verify automated processing scenarios
         env:
@@ -261,4 +263,42 @@ jobs:
             and (.structuredData.data.items | length) == 5
           ' >/dev/null
 
-          echo "Automation E2E passed: Processed, idempotency, NeedsReview, Failed and borderless scenarios verified."
+          echo "Scenario 6: supplier invoice is detected and processed automatically"
+          invoice_upload_json=$(curl -fsS \
+            -X POST \
+            -F 'CustomerId=11111111-1111-1111-1111-111111111111' \
+            -F 'File=@/tmp/supplier-invoice.pdf;type=application/pdf' \
+            http://127.0.0.1:5080/api/documents)
+
+          invoice_document_id=$(printf '%s' "$invoice_upload_json" | jq -r '.id')
+          invoice_status=$(wait_for_terminal_status "$invoice_document_id")
+          if [ "$invoice_status" != "Processed" ]; then
+            cat /tmp/docflow-api.log
+            echo "Expected supplier invoice to be Processed but got '$invoice_status'."
+            exit 1
+          fi
+
+          invoice_result_json=$(curl -fsS \
+            "http://127.0.0.1:5080/api/documents/$invoice_document_id/extraction-result")
+          echo "Supplier invoice persisted extraction result:"
+          printf '%s' "$invoice_result_json" | jq .
+
+          printf '%s' "$invoice_result_json" | jq -e '
+            .validationStatus == "Valid"
+            and .confidence == 1
+            and .structuredData.engine == "deterministic_supplier_invoice_v1"
+            and .structuredData.document_type == "supplier_invoice"
+            and .structuredData.validation_status == "valid"
+            and .structuredData.data.invoice_number == "INV-2026-091"
+            and .structuredData.data.invoice_date == "2026-09-30"
+            and .structuredData.data.due_date == "2026-10-30"
+            and .structuredData.data.currency == "EUR"
+            and .structuredData.data.purchase_order_number == "PO-78421"
+            and .structuredData.data.subtotal == "1457.00"
+            and .structuredData.data.vat_rate == "20"
+            and .structuredData.data.vat_amount == "291.40"
+            and .structuredData.data.total == "1748.40"
+            and (.structuredData.data.items | length) == 5
+          ' >/dev/null
+
+          echo "Automation E2E passed: quotations, idempotency, review/failure routing, borderless layout and supplier invoice verified."
