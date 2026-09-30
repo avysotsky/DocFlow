@@ -66,16 +66,31 @@ def main() -> None:
         font_size=6.2,
     )
 
-    page.insert_textbox(pymupdf.Rect(30, 360, 220, 390), "Subtotal\n1457.00 EUR", fontsize=9)
-    page.insert_textbox(pymupdf.Rect(250, 360, 440, 390), "VAT 20%\n291.40 EUR", fontsize=9)
-    page.insert_textbox(pymupdf.Rect(470, 360, 660, 390), "Total\n1748.40 EUR", fontsize=9)
+    # Keep totals vertically separated. PyMuPDF may merge horizontally aligned
+    # text into one block, while the deterministic extractor deliberately reads
+    # each totals block by its leading label.
     page.insert_textbox(
-        pymupdf.Rect(30, 415, 600, 440),
+        pymupdf.Rect(30, 355, 330, 378),
+        "Subtotal: 1457.00 EUR",
+        fontsize=9,
+    )
+    page.insert_textbox(
+        pymupdf.Rect(30, 385, 330, 408),
+        "VAT 20%: 291.40 EUR",
+        fontsize=9,
+    )
+    page.insert_textbox(
+        pymupdf.Rect(30, 415, 330, 438),
+        "Total: 1748.40 EUR",
+        fontsize=9,
+    )
+    page.insert_textbox(
+        pymupdf.Rect(30, 460, 600, 485),
         "Payment terms: 30% advance, 70% before shipment.",
         fontsize=9,
     )
     page.insert_textbox(
-        pymupdf.Rect(30, 455, 400, 490),
+        pymupdf.Rect(30, 505, 400, 540),
         "Prepared by: Martin Keller\nQuote status: Issued",
         fontsize=9,
     )
