@@ -1,0 +1,181 @@
+name: Scanned OCR E2E
+
+on:
+  push:
+    branches:
+      - 'DocFlow/v_*'
+    paths:
+      - 'src/DocFlow.Api/**'
+      - 'src/DocFlow.Application/**'
+      - 'src/DocFlow.Domain/**'
+      - 'src/DocFlow.Infrastructure/**'
+      - 'src/DocFlow.Extraction.Worker/**'
+      - '.github/scripts/generate_supplier_quotation_pdf.py'
+      - '.github/scripts/rasterize_pdf.py'
+      - '.github/workflows/scanned-ocr-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scanned-quotation:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: docflow
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d docflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
+
+      - name: Install Tesseract OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+          tessdata_dir=$(dirname "$(dpkg -L tesseract-ocr-eng | grep '/eng.traineddata$' | head -n 1)")
+          test -n "$tessdata_dir"
+          echo "TESSDATA_PREFIX=$tessdata_dir" >> "$GITHUB_ENV"
+          tesseract --version
+
+      - name: Install Python worker
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pip install -e ".[dev]"
+
+      - name: Build .NET
+        run: |
+          dotnet restore DocFlow.sln
+          dotnet build DocFlow.sln --configuration Release --no-restore
+
+      - name: Apply database migrations
+        env:
+          ConnectionStrings__DocFlowDbContext: Host=127.0.0.1;Port=5432;Database=docflow;Username=postgres;Password=postgres
+        run: |
+          dotnet tool install --global dotnet-ef --version 8.0.21
+          ~/.dotnet/tools/dotnet-ef database update \
+            --project src/DocFlow.Infrastructure/DocFlow.Infrastructure.csproj \
+            --startup-project src/DocFlow.Api/DocFlow.Api.csproj
+
+      - name: Generate image-only supplier quotation
+        run: |
+          python .github/scripts/generate_supplier_quotation_pdf.py /tmp/digital-borderless.pdf --borderless
+          python .github/scripts/rasterize_pdf.py /tmp/digital-borderless.pdf /tmp/scanned-supplier-quotation.pdf 300
+          python - <<'PY'
+          import pymupdf
+          doc = pymupdf.open('/tmp/scanned-supplier-quotation.pdf')
+          assert len(doc) == 1
+          assert not doc[0].get_text('text').strip(), 'Fixture must be image-only before OCR.'
+          print('Scanned fixture native text length:', len(doc[0].get_text('text').strip()))
+          doc.close()
+          PY
+
+      - name: Verify scanned upload-to-persistence flow
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://127.0.0.1:5080
+          ConnectionStrings__DocFlowDbContext: Host=127.0.0.1;Port=5432;Database=docflow;Username=postgres;Password=postgres
+        run: |
+          set -euo pipefail
+
+          dotnet run \
+            --project src/DocFlow.Api/DocFlow.Api.csproj \
+            --configuration Release \
+            --no-build \
+            --no-launch-profile \
+            > /tmp/docflow-api.log 2>&1 &
+          api_pid=$!
+
+          cleanup() {
+            kill "$api_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5080/swagger/v1/swagger.json >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != "true" ]; then
+            cat /tmp/docflow-api.log
+            echo "API did not become ready."
+            exit 1
+          fi
+
+          upload_json=$(curl -fsS \
+            -X POST \
+            -F 'CustomerId=11111111-1111-1111-1111-111111111111' \
+            -F 'File=@/tmp/scanned-supplier-quotation.pdf;type=application/pdf' \
+            http://127.0.0.1:5080/api/documents)
+
+          document_id=$(printf '%s' "$upload_json" | jq -r '.id')
+          test -n "$document_id"
+          test "$document_id" != "null"
+
+          final_status=""
+          for _ in $(seq 1 60); do
+            document_json=$(curl -fsS "http://127.0.0.1:5080/api/documents/$document_id")
+            final_status=$(printf '%s' "$document_json" | jq -r '.status')
+            case "$final_status" in
+              Processed|NeedsReview|Failed)
+                break
+                ;;
+            esac
+            sleep 1
+          done
+
+          echo "Scanned quotation final status: $final_status"
+          if [ "$final_status" = "Failed" ]; then
+            cat /tmp/docflow-api.log
+            exit 1
+          fi
+
+          result_json=$(curl -fsS \
+            "http://127.0.0.1:5080/api/documents/$document_id/extraction-result")
+          echo "Scanned quotation extraction result:"
+          printf '%s' "$result_json" | jq .
+
+          test "$final_status" = "Processed"
+          printf '%s' "$result_json" | jq -e '
+            .validationStatus == "Valid"
+            and .confidence == 1
+            and .structuredData.engine == "deterministic_supplier_quotation_v1"
+            and .structuredData.document_type == "supplier_quotation"
+            and .structuredData.validation_status == "valid"
+            and .structuredData.data.quotation_number == "QT-2026-183"
+            and .structuredData.data.currency == "EUR"
+            and .structuredData.data.subtotal == "1457.00"
+            and .structuredData.data.vat_rate == "20"
+            and .structuredData.data.vat_amount == "291.40"
+            and .structuredData.data.total == "1748.40"
+            and (.structuredData.data.items | length) == 5
+          ' >/dev/null
+
+          echo "Scanned OCR E2E passed for document $document_id"
