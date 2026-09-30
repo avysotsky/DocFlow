@@ -231,7 +231,7 @@ SOURCES: list[dict[str, Any]] = [
     {
         "id": "phoenix-petroleum-invoice-472557",
         "url": "https://assets.publishing.service.gov.uk/media/5a7b873fed915d131105fd51/UK-2798-revision-2.pdf",
-        "marker": "Phoenix Petroleum",
+        "marker": "472557",
         "supplier": "Phoenix Petroleum Limited",
         "layout_class": "embedded-scanned-separate-discount-row",
         "ocr_page_limit": 18,
