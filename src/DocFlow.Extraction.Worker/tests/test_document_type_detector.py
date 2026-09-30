@@ -36,6 +36,21 @@ def test_detects_supplier_invoice() -> None:
     assert detect_document_type(content) == "supplier_invoice"
 
 
+@pytest.mark.parametrize(
+    "title",
+    [
+        "PROFORMA INVOICE",
+        "Pro-Forma Invoice",
+    ],
+)
+def test_detects_proforma_invoice_as_supplier_invoice(title: str) -> None:
+    content = _content(
+        f"{title}\nReference PR-46039\nPayment 100% advance\nGrand Total 71,700.00"
+    )
+
+    assert detect_document_type(content) == "supplier_invoice"
+
+
 def test_rejects_unknown_document_type() -> None:
     with pytest.raises(ValueError, match="could not be detected"):
         detect_document_type(_content("Generic supplier document"))
