@@ -12,6 +12,8 @@ thresholding, deskewing, denoising, resampling, or OCR is performed by this acqu
 script.
 
 Ground truth was transcribed from the visible source invoice before DocFlow processing.
+The expected DocFlow validation status is ``incomplete`` because the scan does not expose
+reliable quantity/unit-price columns for independent line-total and subtotal validation.
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ SOURCE: dict[str, Any] = {
     "language": "en-GB",
     "expected": {
         "document_type": "supplier_invoice",
-        "validation_status": "valid",
+        "validation_status": "incomplete",
         "fields": {
             "data.invoice_number": "WIR00286",
             "data.invoice_date": "2013-12-18",
