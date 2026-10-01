@@ -2,7 +2,7 @@
 
 DocFlow is a private commercial project for automated processing of business documents such as supplier quotations and invoices.
 
-The system converts digital or scanned PDF documents into validated structured data, persists the result in PostgreSQL, exposes a tenant-scoped review inbox, and exports reviewed/persisted data to CSV/XLSX for downstream business use.
+The system converts digital or scanned PDF documents into validated structured data, persists the result in PostgreSQL, exposes a tenant-scoped review inbox, allows authenticated retrieval of original source PDFs, and exports reviewed/persisted data to CSV/XLSX for downstream business use.
 
 ## Current MVP flow
 
@@ -18,6 +18,7 @@ Authenticated customer API
   -> deterministic arithmetic validation
   -> PostgreSQL persistence
   -> tenant-scoped inbox / human review
+  -> original PDF retrieval
   -> CSV/XLSX export
   -> explicit terminal document deletion
 ```
@@ -110,6 +111,20 @@ Completed `Processed`/`NeedsReview` documents are not re-enqueued, and `Failed` 
 
 This recovery contract is intentionally scoped to the current **single-instance MVP**. It is not a distributed queue, lease or multi-worker coordination mechanism. If DocFlow later runs multiple active application instances, introduce explicit distributed ownership/queue semantics rather than relying on startup reconciliation alone.
 
+## Original PDF access
+
+Authenticated tenants can retrieve the original source PDF through:
+
+```text
+GET /api/documents/{id}/file
+```
+
+The endpoint streams from `IFileStorage` rather than buffering the full file in memory. It returns `application/pdf`, uses a sanitized attachment filename derived from `OriginalFileName`, and enables ASP.NET Core range processing so clients can issue byte-range requests.
+
+Cross-tenant and absent documents return `404`. If a database row exists but its backing storage file is missing, the API returns a sanitized `500` problem response without exposing filesystem or storage-key details; the underlying exception is logged server-side.
+
+`StorageKey` remains in the existing document metadata DTO for compatibility with current clients. New clients should use `/file` rather than treating the storage key as a retrievable path. Removing or deprecating that field is a separate API-versioning decision.
+
 ## Document deletion and lifecycle
 
 Tenant-scoped explicit deletion is available through:
@@ -122,7 +137,7 @@ Deletion is allowed for terminal `Processed`, `NeedsReview`, and `Failed` docume
 
 The deletion service locks the document row with PostgreSQL `FOR UPDATE`, removes the database row inside a transaction, deletes the stored PDF, and then commits. Existing foreign-key cascades remove the associated `ExtractionResult` and `DocumentReview` records.
 
-Cross-tenant ids return `404`. After successful deletion all normal document, diagnostics, extraction, review and export access returns `404`.
+Cross-tenant ids return `404`. After successful deletion all normal document, file, diagnostics, extraction, review and export access returns `404`.
 
 Local filesystem and PostgreSQL do not form a distributed transaction. A storage failure rolls the database transaction back; a rare database commit failure after successful file deletion remains a residual cross-resource consistency risk.
 
@@ -173,6 +188,7 @@ POST   /api/documents
 GET    /api/documents?status=...&documentType=...&page=1&pageSize=50
 POST   /api/documents/{id}/process
 GET    /api/documents/{id}
+GET    /api/documents/{id}/file
 GET    /api/documents/{id}/processing-diagnostics
 GET    /api/documents/{id}/extraction-result
 PUT    /api/documents/{id}/review
@@ -197,7 +213,7 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints, lifecycle/delete, processing diagnostics, startup recovery, health probes and background-service host.
+- **DocFlow.Api** — authenticated HTTP endpoints, source-file streaming, lifecycle/delete, processing diagnostics, startup recovery, health probes and background-service host.
 - **DocFlow.Application** — processing/export/review/deletion abstractions and orchestration contracts.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review/deletion and export implementation.
@@ -225,8 +241,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, and tenant-scoped terminal document deletion with file/database cleanup.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, and tenant-scoped original PDF streaming with range support.
 
-A strong next narrow product gap is authenticated access to the original stored PDF. Human review exists, but the API currently exposes metadata/structured data without a tenant-scoped file-download endpoint, so a reviewer cannot retrieve the source document through the API itself.
+The next narrow lifecycle candidate is an explicit retention policy around the existing `DeleteAt` metadata. Before implementing it, inspect how `DeleteAt` is currently initialized and define deterministic rules for terminal versus active documents; do not silently auto-delete active work.
 
 Production code remains private. A separate public portfolio repository may be created later.
