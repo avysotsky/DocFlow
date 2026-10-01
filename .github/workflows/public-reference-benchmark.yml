@@ -1,5 +1,5 @@
 name: Public Reference Benchmark
-# Validation batch: degraded OCR summary recovery
+# Validation batch: sparse OCR invoice date
 
 on:
   push:
