@@ -9,6 +9,7 @@ The system converts digital or scanned PDF documents into validated structured d
 ```text
 Authenticated customer API
   -> PDF upload
+  -> bounded background processing attempts
   -> automatic digital/scanned handling
   -> native text extraction or conditional Tesseract OCR
   -> automatic document-type detection
@@ -65,6 +66,33 @@ Configuration shape:
 
 Do not commit production API keys. Supply them with environment variables, user-secrets, or a production secret store. Outside Development the application fails startup unless at least one valid API-key client is configured.
 
+## Processing retries and diagnostics
+
+Background processing uses a bounded retry policy for technical processing failures. Default configuration:
+
+```json
+{
+  "Processing": {
+    "Retry": {
+      "MaxAttempts": 3,
+      "RetryDelayMilliseconds": 250
+    }
+  }
+}
+```
+
+Each real processing attempt is persisted on the document. A document is moved to `Failed` only after the configured attempts for that dequeued job are exhausted. Successful processing clears the last failure summary while retaining the attempt count and last-attempt timestamp.
+
+Tenant-scoped safe diagnostics are available through:
+
+```text
+GET /api/documents/{id}/processing-diagnostics
+```
+
+The response includes the current status, persisted processing-attempt count, last attempt/failure timestamps, and a bounded sanitized technical failure summary. Full exception detail remains in application logs rather than being exposed to API clients.
+
+The queue itself is still in-memory. Bounded retry improves transient-failure handling but does not yet provide durable job recovery across process restarts.
+
 ## Production deployment
 
 The repository includes a production `Dockerfile` and `compose.yaml`.
@@ -110,6 +138,7 @@ POST /api/documents
 GET  /api/documents?status=...&documentType=...&page=1&pageSize=50
 POST /api/documents/{id}/process
 GET  /api/documents/{id}
+GET  /api/documents/{id}/processing-diagnostics
 GET  /api/documents/{id}/extraction-result
 PUT  /api/documents/{id}/review
 GET  /api/documents/{id}/export?format=csv
@@ -132,7 +161,7 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints, health probes and background-service host.
+- **DocFlow.Api** — authenticated HTTP endpoints, processing diagnostics, health probes and background-service host.
 - **DocFlow.Application** — processing/export/review abstractions and orchestration contracts.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review and export implementation.
@@ -160,8 +189,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, and reproducible container deployment with health/readiness checks.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, and bounded technical-failure retries with persisted processing diagnostics.
 
-The next milestone should address a measured product/operational gap such as reviewer audit identity, observability/retries, retention/delete, or batch handling rather than extending extraction rules without evidence.
+The next operational gap is restart recovery for the still in-memory processing queue. A narrow recovery milestone should be considered before introducing a full external broker: on startup, safely reconcile persisted `Uploaded`/stale `Processing` documents and re-enqueue work using the existing idempotency guarantees.
 
 Production code remains private. A separate public portfolio repository may be created later.

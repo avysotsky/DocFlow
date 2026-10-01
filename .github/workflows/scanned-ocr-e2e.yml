@@ -7,11 +7,8 @@ on:
       - 'DocFlow/v_*'
     paths:
       - 'src/DocFlow.Extraction.Worker/**'
-      - 'src/DocFlow.Infrastructure/Processing/**'
+      - 'src/DocFlow.Infrastructure/Processing/PythonDocumentExtractionRunner.cs'
       - 'src/DocFlow.Application/Abstractions/IDocumentExtractionRunner.cs'
-      - 'src/DocFlow.Application/Abstractions/IDocumentProcessingQueue.cs'
-      - 'src/DocFlow.Application/Abstractions/IDocumentProcessingService.cs'
-      - 'src/DocFlow.Api/BackgroundServices/DocumentProcessingBackgroundService.cs'
       - '.github/scripts/generate_supplier_quotation_pdf.py'
       - '.github/scripts/rasterize_pdf.py'
       - '.github/workflows/scanned-ocr-e2e.yml'

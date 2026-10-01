@@ -9,7 +9,6 @@ on:
       - '.dockerignore'
       - 'compose.yaml'
       - '.env.example'
-      - 'src/DocFlow.Api/Program.cs'
       - 'src/DocFlow.Api/Controllers/HealthController.cs'
       - '.github/workflows/deployment-smoke.yml'
   workflow_dispatch:
