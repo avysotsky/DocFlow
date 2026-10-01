@@ -63,7 +63,43 @@ Configuration shape:
 }
 ```
 
-Do not commit production API keys. Supply them with environment variables, user-secrets, or a production secret store.
+Do not commit production API keys. Supply them with environment variables, user-secrets, or a production secret store. Outside Development the application fails startup unless at least one valid API-key client is configured.
+
+## Production deployment
+
+The repository includes a production `Dockerfile` and `compose.yaml`.
+
+The runtime image contains:
+
+- the published .NET 8 API;
+- the Python extraction worker and its dependencies;
+- Tesseract OCR with English language data;
+- persistent document storage mounted at `/data/storage`.
+
+Local production-like startup:
+
+```bash
+cp .env.example .env
+# Replace DOCFLOW_POSTGRES_PASSWORD and DOCFLOW_API_KEY in .env.
+docker compose up --build -d
+```
+
+Docker Compose starts PostgreSQL and DocFlow, uses persistent database/document volumes, and enables EF Core migrations explicitly through:
+
+```text
+Database__ApplyMigrationsOnStartup=true
+```
+
+Outside Compose, migration-on-start remains opt-in and is disabled unless explicitly configured.
+
+Deployment probes:
+
+```text
+GET /health/live
+GET /health/ready
+```
+
+`/health/live` reports process liveness. `/health/ready` requires PostgreSQL connectivity plus the configured storage and extraction-worker runtime paths.
 
 ## API capabilities
 
@@ -96,7 +132,7 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints and background-service host.
+- **DocFlow.Api** — authenticated HTTP endpoints, health probes and background-service host.
 - **DocFlow.Application** — processing/export/review abstractions and orchestration contracts.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review and export implementation.
@@ -124,8 +160,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, and API-key tenant isolation.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, and reproducible container deployment with health/readiness checks.
 
-The next milestone should address a measured product/operational gap such as reviewer audit identity, deployability, observability/retries, retention/delete, or batch handling rather than extending extraction rules without evidence.
+The next milestone should address a measured product/operational gap such as reviewer audit identity, observability/retries, retention/delete, or batch handling rather than extending extraction rules without evidence.
 
 Production code remains private. A separate public portfolio repository may be created later.
