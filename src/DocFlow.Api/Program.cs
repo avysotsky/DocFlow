@@ -1,5 +1,6 @@
 using DocFlow.Api.BackgroundServices;
 using DocFlow.Application.Abstractions;
+using DocFlow.Infrastructure.Export;
 using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
 using DocFlow.Infrastructure.Storage;
@@ -18,6 +19,7 @@ builder.Services.AddDbContext<DocFlowDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
+builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExportService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
