@@ -94,6 +94,8 @@ jobs:
           Authentication__ApiKey__Clients__1__Name: e2e-other
           Authentication__ApiKey__Clients__1__CustomerId: 44444444-4444-4444-4444-444444444444
           Authentication__ApiKey__Clients__1__ApiKey: docflow-e2e-other-key
+          Intake__Idempotency__CleanupIntervalSeconds: 1
+          Intake__Idempotency__CleanupBatchSize: 1
         run: |
           set -euo pipefail
 
@@ -131,6 +133,22 @@ jobs:
           api_key='docflow-e2e-primary-key'
           other_api_key='docflow-e2e-other-key'
           auth_header=(-H "X-DocFlow-Api-Key: $api_key")
+
+          echo "Scenario 0: expired intake idempotency records are cleaned in bounded sweeps"
+          docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO \"IntakeIdempotencyRecords\" (\"CustomerId\", \"Key\", \"RequestFingerprint\", \"Outcome\", \"OriginalFileName\", \"CreatedAt\", \"ExpiresAt\") VALUES ('$customer_id', 'cleanup-expired-1', repeat('a', 64), 'Rejected', 'cleanup-expired-1.pdf', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'), ('$customer_id', 'cleanup-expired-2', repeat('b', 64), 'Rejected', 'cleanup-expired-2.pdf', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'), ('$customer_id', 'cleanup-unexpired', repeat('c', 64), 'Rejected', 'cleanup-unexpired.pdf', NOW(), NOW() + INTERVAL '1 hour');"
+
+          sleep 4
+
+          cleanup_counts=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+            "SELECT COUNT(*) FILTER (WHERE \"Key\" LIKE 'cleanup-expired-%'), COUNT(*) FILTER (WHERE \"Key\" = 'cleanup-unexpired') FROM \"IntakeIdempotencyRecords\";")
+          test "$cleanup_counts" = "0|1"
 
           wait_for_terminal_status() {
             local document_id="$1"

@@ -75,6 +75,12 @@ builder.Services
     .Validate(
         options => options.RetentionHours is >= 1 and <= 720,
         "Intake idempotency RetentionHours must be between 1 and 720.")
+    .Validate(
+        options => options.CleanupIntervalSeconds is >= 1 and <= 86400,
+        "Intake idempotency CleanupIntervalSeconds must be between 1 and 86400.")
+    .Validate(
+        options => options.CleanupBatchSize is >= 1 and <= 5000,
+        "Intake idempotency CleanupBatchSize must be between 1 and 5000.")
     .ValidateOnStart();
 
 builder.Services
@@ -111,11 +117,12 @@ builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
 
 // Hosted services start in registration order. Recovery enqueues persisted orphaned work
-// before the normal single-reader queue consumer begins processing. Retention runs after
-// processing startup and only considers terminal documents.
+// before the normal single-reader queue consumer begins processing. Document retention and
+// idempotency cleanup are independent periodic lifecycle jobs after processing startup.
 builder.Services.AddHostedService<DocumentProcessingRecoveryHostedService>();
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 builder.Services.AddHostedService<DocumentRetentionHostedService>();
+builder.Services.AddHostedService<IntakeIdempotencyCleanupHostedService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
 if (!Path.IsPathRooted(storageRoot))
