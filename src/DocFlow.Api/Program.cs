@@ -20,6 +20,7 @@ builder.Services.AddDbContext<DocFlowDbContext>(options =>
 
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
 builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExportService>();
+builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
