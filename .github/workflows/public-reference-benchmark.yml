@@ -7,6 +7,7 @@ on:
       - 'DocFlow/v_1.1.1.6_HardCases'
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
+      - '.github/scripts/add_multipage_public_reference.py'
       - '.github/scripts/correct_public_reference_selection.py'
       - '.github/scripts/annotate_public_reference_validation.py'
       - '.github/scripts/dump_public_reference_text.py'
@@ -53,6 +54,9 @@ jobs:
             --output /tmp/docflow-public-reference \
             --min-documents 8
 
+          python .github/scripts/add_multipage_public_reference.py \
+            --root /tmp/docflow-public-reference
+
           python .github/scripts/correct_public_reference_selection.py \
             --root /tmp/docflow-public-reference
 
@@ -78,17 +82,17 @@ jobs:
             exit 2
           fi
 
-          if ! jq -e '.documents[] | select(.id == "phoenix-petroleum-invoice-472557")' \
-            /tmp/docflow-public-reference/manifest.json > /dev/null; then
-            echo "Phoenix Petroleum hard case must be admitted into the benchmark manifest."
-            exit 2
-          fi
-
-          if ! jq -e '.documents[] | select(.id == "cargo-international-invoice-g59771")' \
-            /tmp/docflow-public-reference/manifest.json > /dev/null; then
-            echo "Cargo International German locale hard case must be admitted into the benchmark manifest."
-            exit 2
-          fi
+          for required in \
+            phoenix-petroleum-invoice-472557 \
+            cargo-international-invoice-g59771 \
+            casterton-foodworks-invoice-02706
+          do
+            if ! jq -e --arg id "$required" '.documents[] | select(.id == $id)' \
+              /tmp/docflow-public-reference/manifest.json > /dev/null; then
+              echo "Required hard case $required is missing from the benchmark manifest."
+              exit 2
+            fi
+          done
 
       - name: Audit and benchmark public reference corpus
         id: benchmark
