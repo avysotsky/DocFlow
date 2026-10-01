@@ -18,6 +18,7 @@ Authenticated customer API
   -> deterministic arithmetic validation
   -> PostgreSQL persistence
   -> tenant-scoped inbox / human review
+  -> authenticated client audit attribution for review submissions
   -> original PDF retrieval
   -> CSV/XLSX export
   -> explicit terminal document deletion
@@ -69,6 +70,16 @@ Configuration shape:
 ```
 
 Do not commit production API keys. Supply them with environment variables, user-secrets, or a production secret store. Outside Development the application fails startup unless at least one valid API-key client is configured.
+
+## Review audit attribution
+
+New document reviews persist the authenticated API client name as `ReviewedByClient`. The value comes from the trusted API-key principal (`docflow:client_name`) and is never accepted as authoritative review identity from the request payload.
+
+The attribution is exposed in the review response, `GET /api/documents/{id}/extraction-result`, the effective `human_review.reviewed_by_client` structured data, and CSV/XLSX export.
+
+The database column is nullable only for backward compatibility with reviews created before this audit field existed; historical rows are not backfilled with invented identities. New reviews require a non-empty authenticated client attribution.
+
+`ReviewedByClient` identifies an authenticated tenant/integration client. It must not be interpreted as a named human reviewer. If named-human accountability becomes a product requirement, add a real user identity/IAM boundary rather than trusting a caller-supplied name or re-labeling the API client.
 
 ## Processing retries and diagnostics
 
@@ -270,8 +281,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, and opt-in automatic retention for expired terminal documents.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, and authenticated API-client attribution for review audit records.
 
-A strong next product gap is review audit identity. `DocumentReview` records when and what was corrected, but they still do not identify an authenticated human reviewer. The current API-key client identity is a tenant/integration identity and must not be mislabeled as a human reviewer; the authentication/audit boundary should be inspected before implementing this.
+A strong next narrow operational gap is metrics/observability. Before implementing it, inspect current logging, queue visibility and health endpoints and add only measurements that materially help operate the MVP; do not introduce a broad telemetry platform without a concrete deployment need.
 
 Production code remains private. A separate public portfolio repository may be created later.
