@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DocFlow.Api.Authentication;
+using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
 using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
@@ -8,6 +9,7 @@ using DocFlow.Infrastructure.Processing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace DocFlow.Api.Controllers;
 
@@ -24,17 +26,20 @@ public sealed class DocumentsController : ControllerBase
     private readonly IFileStorage _fileStorage;
     private readonly IExtractionResultService _extractionResultService;
     private readonly IDocumentProcessingQueue _documentProcessingQueue;
+    private readonly DocumentRetentionOptions _retentionOptions;
 
     public DocumentsController(
         DocFlowDbContext dbContext,
         IFileStorage fileStorage,
         IExtractionResultService extractionResultService,
-        IDocumentProcessingQueue documentProcessingQueue)
+        IDocumentProcessingQueue documentProcessingQueue,
+        IOptions<DocumentRetentionOptions> retentionOptions)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
         _extractionResultService = extractionResultService;
         _documentProcessingQueue = documentProcessingQueue;
+        _retentionOptions = retentionOptions.Value;
     }
 
     [HttpGet]
@@ -360,12 +365,17 @@ public sealed class DocumentsController : ControllerBase
                 cancellationToken);
         }
 
+        var deleteAt = _retentionOptions.Enabled
+            ? DateTimeOffset.UtcNow.AddDays(_retentionOptions.DefaultRetentionDays)
+            : (DateTimeOffset?)null;
+
         var document = new Document(
             customerId,
             file.FileName,
             file.ContentType,
             storageKey,
-            file.Length);
+            file.Length,
+            deleteAt);
 
         try
         {
@@ -394,7 +404,8 @@ public sealed class DocumentsController : ControllerBase
             document.Id,
             document.Status.ToString(),
             document.OriginalFileName,
-            document.CreatedAt);
+            document.CreatedAt,
+            document.DeleteAt);
 
         return StatusCode(StatusCodes.Status201Created, response);
     }
@@ -507,7 +518,8 @@ public sealed class DocumentsController : ControllerBase
         Guid Id,
         string Status,
         string OriginalFileName,
-        DateTimeOffset CreatedAt);
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? DeleteAt);
 
     public sealed record GetDocumentResponse(
         Guid Id,
