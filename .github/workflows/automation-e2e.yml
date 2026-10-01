@@ -1,5 +1,5 @@
 name: Automation E2E
-# Milestone validation: 1.1.1.9 DocumentInbox final block
+# Milestone validation: 1.1.1.10 DocumentReview
 
 on:
   push:
@@ -15,6 +15,7 @@ on:
       - '.github/scripts/generate_supplier_invoice_pdf.py'
       - '.github/scripts/verify_document_export.py'
       - '.github/scripts/verify_document_inbox.py'
+      - '.github/scripts/verify_document_review.py'
       - '.github/workflows/automation-e2e.yml'
   workflow_dispatch:
 
@@ -330,4 +331,10 @@ jobs:
             --failed-document-id "$failed_document_id" \
             --needs-review-document-id "$invalid_document_id"
 
-          echo "Automation E2E passed: quotations, idempotency, review/failure routing, borderless layout, supplier invoice, CSV/XLSX export and document inbox verified."
+          echo "Scenario 9: NeedsReview document can be human-reviewed and exported"
+          python .github/scripts/verify_document_review.py \
+            --base-url http://127.0.0.1:5080 \
+            --review-document-id "$invalid_document_id" \
+            --processed-document-id "$invoice_document_id"
+
+          echo "Automation E2E passed: quotations, idempotency, review/failure routing, borderless layout, supplier invoice, CSV/XLSX export, document inbox and human review verified."
