@@ -1,5 +1,5 @@
 name: Automation E2E
-# Milestone validation: 1.1.1.10 DocumentReview
+# Final validation: 1.1.1.10 DocumentReview
 
 on:
   push:
