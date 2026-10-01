@@ -23,6 +23,7 @@ Authenticated customer API
   -> CSV/XLSX export
   -> explicit terminal document deletion
   -> optional automatic retention cleanup
+  -> optional protected operational metrics
 ```
 
 Measured public-reference baseline:
@@ -183,6 +184,51 @@ Each retention deletion reuses the same `IDocumentDeletionService` as the explic
 
 This scheduler follows the same **single-instance MVP** boundary as processing recovery. It is not a distributed retention lease/scheduler.
 
+## Operational metrics
+
+DocFlow maintains a small set of thread-safe, process-local operational counters and gauges. Metrics are opt-in and disabled by default:
+
+```json
+{
+  "Operations": {
+    "Metrics": {
+      "Enabled": false,
+      "ApiKey": ""
+    }
+  }
+}
+```
+
+When explicitly enabled, operators can read the snapshot through:
+
+```text
+GET /operations/metrics
+X-DocFlow-Metrics-Key: <operator-secret>
+```
+
+The operator credential is deliberately separate from customer `X-DocFlow-Api-Key` credentials. Global process telemetry must not be exposed through tenant authorization.
+
+The snapshot contains only low-cardinality runtime values:
+
+```text
+startedAt
+uptimeSeconds
+pendingQueueDepth
+processingCompleted
+processingNeedsReview
+processingFailed
+processingRetries
+reviewsCompleted
+retentionDeleted
+retentionFailures
+```
+
+No metric contains a document id, filename, customer id or API client identity. Counters reset on process restart and are not aggregated across application instances.
+
+`PendingQueueDepth` is updated with publication-safe ordering: the gauge is reserved before an id is made visible to the channel reader and rolled back if channel publication fails.
+
+This is intentionally a narrow JSON operational surface, not a Prometheus/OpenTelemetry backend. Add external collection/aggregation only when deployment requirements justify it.
+
 ## Production deployment
 
 The repository includes a production `Dockerfile` and `compose.yaml`.
@@ -237,6 +283,12 @@ GET    /api/documents/{id}/export?format=xlsx
 DELETE /api/documents/{id}
 ```
 
+Operator-only optional surface:
+
+```text
+GET /operations/metrics
+```
+
 Export uses the already persisted effective extraction result and does not rerun OCR or extraction.
 
 ## Solution structure
@@ -253,8 +305,8 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints, source-file streaming, lifecycle/delete, retention scheduling, processing diagnostics, startup recovery, health probes and background-service host.
-- **DocFlow.Application** — processing/export/review/deletion abstractions and orchestration contracts.
+- **DocFlow.Api** — authenticated HTTP endpoints, operator metrics surface, source-file streaming, lifecycle/delete, retention scheduling, processing diagnostics, startup recovery, health probes and background-service host.
+- **DocFlow.Application** — processing/export/review/deletion abstractions plus process-local operational metric state.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review/deletion and export implementation.
 - **DocFlow.Extraction.Worker** — Python PDF/OCR parsing, deterministic semantic extraction, validation and benchmark tooling.
@@ -281,8 +333,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, and authenticated API-client attribution for review audit records.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, and protected low-cardinality process-local operational metrics.
 
-A strong next narrow operational gap is metrics/observability. Before implementing it, inspect current logging, queue visibility and health endpoints and add only measurements that materially help operate the MVP; do not introduce a broad telemetry platform without a concrete deployment need.
+A strong next product candidate is bounded batch intake. Before implementing it, extract or reuse the current single-document validation/storage/persistence/enqueue path and define explicit per-file partial-failure semantics; do not mix ZIP/email/cloud-ingestion features into the same milestone.
 
 Production code remains private. A separate public portfolio repository may be created later.
