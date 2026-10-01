@@ -1,3 +1,7 @@
+using System.Buffers.Binary;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
 using DocFlow.Domain.Entities;
@@ -21,7 +25,8 @@ public sealed record DocumentIntakeResult(
     string? DocumentStatus = null,
     DateTimeOffset? CreatedAt = null,
     DateTimeOffset? DeleteAt = null,
-    string? Error = null);
+    string? Error = null,
+    bool IsReplay = false);
 
 public sealed class DocumentIntakeService
 {
@@ -31,6 +36,8 @@ public sealed class DocumentIntakeService
     private readonly IFileStorage _fileStorage;
     private readonly IDocumentProcessingQueue _documentProcessingQueue;
     private readonly DocumentRetentionOptions _retentionOptions;
+    private readonly DocumentIntakeIdempotencyOptions _idempotencyOptions;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<DocumentIntakeService> _logger;
 
     public DocumentIntakeService(
@@ -38,12 +45,16 @@ public sealed class DocumentIntakeService
         IFileStorage fileStorage,
         IDocumentProcessingQueue documentProcessingQueue,
         IOptions<DocumentRetentionOptions> retentionOptions,
+        IOptions<DocumentIntakeIdempotencyOptions> idempotencyOptions,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<DocumentIntakeService> logger)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
         _documentProcessingQueue = documentProcessingQueue;
         _retentionOptions = retentionOptions.Value;
+        _idempotencyOptions = idempotencyOptions.Value;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
 
@@ -55,6 +66,62 @@ public sealed class DocumentIntakeService
         if (customerId == Guid.Empty)
             throw new ArgumentException("Customer id is required.", nameof(customerId));
 
+        var (idempotencyKey, headerError) = ResolveSingleUploadIdempotencyKey();
+        if (headerError is not null)
+        {
+            return new DocumentIntakeResult(
+                DocumentIntakeOutcome.Rejected,
+                file?.FileName ?? string.Empty,
+                Error: headerError);
+        }
+
+        if (idempotencyKey is null)
+            return await IntakeWithoutIdempotencyAsync(customerId, file, cancellationToken);
+
+        var normalizedKey = idempotencyKey.Trim();
+        if (normalizedKey.Length == 0)
+        {
+            return new DocumentIntakeResult(
+                DocumentIntakeOutcome.Rejected,
+                file?.FileName ?? string.Empty,
+                Error: "Idempotency-Key must not be empty.");
+        }
+
+        if (normalizedKey.Length > IntakeIdempotencyRecord.MaxKeyLength)
+        {
+            return new DocumentIntakeResult(
+                DocumentIntakeOutcome.Rejected,
+                file?.FileName ?? string.Empty,
+                Error: $"Idempotency-Key must not exceed {IntakeIdempotencyRecord.MaxKeyLength} characters.");
+        }
+
+        if (normalizedKey.Any(char.IsControl))
+        {
+            return new DocumentIntakeResult(
+                DocumentIntakeOutcome.Rejected,
+                file?.FileName ?? string.Empty,
+                Error: "Idempotency-Key must not contain control characters.");
+        }
+
+        var fingerprint = await ComputeRequestFingerprintAsync(file, cancellationToken);
+        var result = await IntakeWithIdempotencyAsync(
+            customerId,
+            file,
+            normalizedKey,
+            fingerprint,
+            cancellationToken);
+
+        if (result.IsReplay && _httpContextAccessor.HttpContext is { } httpContext)
+            httpContext.Response.Headers["Idempotency-Replayed"] = "true";
+
+        return result;
+    }
+
+    private async Task<DocumentIntakeResult> IntakeWithoutIdempotencyAsync(
+        Guid customerId,
+        IFormFile? file,
+        CancellationToken cancellationToken)
+    {
         var fileName = file?.FileName ?? string.Empty;
         var validationError = await ValidateAsync(file, cancellationToken);
         if (validationError is not null)
@@ -94,17 +161,7 @@ public sealed class DocumentIntakeService
                 Error: "The document could not be stored.");
         }
 
-        var deleteAt = _retentionOptions.Enabled
-            ? DateTimeOffset.UtcNow.AddDays(_retentionOptions.DefaultRetentionDays)
-            : (DateTimeOffset?)null;
-
-        var document = new Document(
-            customerId,
-            validatedFile.FileName,
-            validatedFile.ContentType,
-            storageKey,
-            validatedFile.Length,
-            deleteAt);
+        var document = CreateDocument(customerId, validatedFile, storageKey);
 
         try
         {
@@ -133,22 +190,229 @@ public sealed class DocumentIntakeService
                 Error: "The document could not be persisted.");
         }
 
+        await TryEnqueueAsync(document);
+        return AcceptedResult(document);
+    }
+
+    private async Task<DocumentIntakeResult> IntakeWithIdempotencyAsync(
+        Guid customerId,
+        IFormFile? file,
+        string key,
+        string fingerprint,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        var lockScope = $"{customerId:N}:{key}";
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({lockScope}, 0));",
+            cancellationToken);
+
+        var existing = await _dbContext.IntakeIdempotencyRecords
+            .SingleOrDefaultAsync(
+                x => x.CustomerId == customerId && x.Key == key,
+                cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        if (existing is not null && existing.ExpiresAt > now)
+        {
+            if (!string.Equals(
+                    existing.RequestFingerprint,
+                    fingerprint,
+                    StringComparison.Ordinal))
+            {
+                throw new IntakeIdempotencyConflictException(
+                    "The Idempotency-Key was already used with a different request payload.");
+            }
+
+            var replay = ReplayResult(existing);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
+
+        var validationError = await ValidateAsync(file, cancellationToken);
+        if (validationError is not null)
+        {
+            var rejected = new DocumentIntakeResult(
+                DocumentIntakeOutcome.Rejected,
+                file?.FileName ?? string.Empty,
+                Error: validationError);
+
+            try
+            {
+                var record = UpsertIdempotencyRecord(
+                    existing,
+                    customerId,
+                    key,
+                    fingerprint,
+                    rejected,
+                    now);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return rejected;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                if (existing is not null)
+                    _dbContext.Entry(existing).State = EntityState.Detached;
+
+                _logger.LogError(
+                    exception,
+                    "Could not persist rejected idempotent intake outcome for key {IdempotencyKey}.",
+                    key);
+
+                return new DocumentIntakeResult(
+                    DocumentIntakeOutcome.Failed,
+                    file?.FileName ?? string.Empty,
+                    Error: "The document intake result could not be persisted.");
+            }
+        }
+
+        var validatedFile = file!;
+        string storageKey;
         try
         {
-            // The database row is already durable. Preserve the previous single-upload behavior
-            // by completing the enqueue independently of the request cancellation token.
-            await _documentProcessingQueue.EnqueueAsync(document.Id, CancellationToken.None);
+            await using var input = validatedFile.OpenReadStream();
+            storageKey = await _fileStorage.UploadAsync(
+                input,
+                validatedFile.FileName,
+                validatedFile.ContentType,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
-            // A persisted Uploaded document is still recoverable on the next process start and
-            // can also be explicitly re-enqueued through POST /api/documents/{id}/process.
             _logger.LogError(
                 exception,
-                "Document {DocumentId} was persisted but could not be enqueued immediately.",
-                document.Id);
+                "Idempotent document intake storage upload failed for file {FileName}.",
+                validatedFile.FileName);
+
+            return new DocumentIntakeResult(
+                DocumentIntakeOutcome.Failed,
+                validatedFile.FileName,
+                Error: "The document could not be stored.");
         }
 
+        var document = CreateDocument(customerId, validatedFile, storageKey);
+        var accepted = AcceptedResult(document);
+        IntakeIdempotencyRecord? persistedRecord = null;
+
+        try
+        {
+            _dbContext.Documents.Add(document);
+            persistedRecord = UpsertIdempotencyRecord(
+                existing,
+                customerId,
+                key,
+                fingerprint,
+                accepted,
+                now);
+
+            // Once storage succeeds, complete the durable state transition independently from
+            // client disconnect. A retry can then replay the committed response.
+            await _dbContext.SaveChangesAsync(CancellationToken.None);
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // Preserve the original persistence exception.
+            }
+
+            _dbContext.Entry(document).State = EntityState.Detached;
+            if (persistedRecord is not null)
+                _dbContext.Entry(persistedRecord).State = EntityState.Detached;
+
+            await TryDeleteStoredFileAsync(storageKey);
+
+            _logger.LogError(
+                exception,
+                "Idempotent document intake persistence failed for file {FileName}.",
+                validatedFile.FileName);
+
+            return new DocumentIntakeResult(
+                DocumentIntakeOutcome.Failed,
+                validatedFile.FileName,
+                Error: "The document could not be persisted.");
+        }
+
+        await TryEnqueueAsync(document);
+        return accepted;
+    }
+
+    private IntakeIdempotencyRecord UpsertIdempotencyRecord(
+        IntakeIdempotencyRecord? existing,
+        Guid customerId,
+        string key,
+        string fingerprint,
+        DocumentIntakeResult result,
+        DateTimeOffset now)
+    {
+        var expiresAt = now.AddHours(_idempotencyOptions.RetentionHours);
+
+        if (existing is null)
+        {
+            var created = new IntakeIdempotencyRecord(
+                customerId,
+                key,
+                fingerprint,
+                result.Outcome.ToString(),
+                result.OriginalFileName,
+                now,
+                expiresAt,
+                result.DocumentId,
+                result.DocumentStatus,
+                result.CreatedAt,
+                result.DeleteAt,
+                result.Error);
+
+            _dbContext.IntakeIdempotencyRecords.Add(created);
+            return created;
+        }
+
+        existing.Replace(
+            fingerprint,
+            result.Outcome.ToString(),
+            result.OriginalFileName,
+            now,
+            expiresAt,
+            result.DocumentId,
+            result.DocumentStatus,
+            result.CreatedAt,
+            result.DeleteAt,
+            result.Error);
+        return existing;
+    }
+
+    private Document CreateDocument(Guid customerId, IFormFile file, string storageKey)
+    {
+        var deleteAt = _retentionOptions.Enabled
+            ? DateTimeOffset.UtcNow.AddDays(_retentionOptions.DefaultRetentionDays)
+            : (DateTimeOffset?)null;
+
+        return new Document(
+            customerId,
+            file.FileName,
+            file.ContentType,
+            storageKey,
+            file.Length,
+            deleteAt);
+    }
+
+    private static DocumentIntakeResult AcceptedResult(Document document)
+    {
         return new DocumentIntakeResult(
             DocumentIntakeOutcome.Accepted,
             document.OriginalFileName,
@@ -156,6 +420,69 @@ public sealed class DocumentIntakeService
             document.Status.ToString(),
             document.CreatedAt,
             document.DeleteAt);
+    }
+
+    private static DocumentIntakeResult ReplayResult(IntakeIdempotencyRecord record)
+    {
+        if (!Enum.TryParse<DocumentIntakeOutcome>(record.Outcome, out var outcome)
+            || outcome is not (DocumentIntakeOutcome.Accepted or DocumentIntakeOutcome.Rejected))
+        {
+            throw new InvalidOperationException(
+                $"Unsupported persisted idempotency outcome '{record.Outcome}'.");
+        }
+
+        return new DocumentIntakeResult(
+            outcome,
+            record.OriginalFileName,
+            record.DocumentId,
+            record.DocumentStatus,
+            record.DocumentCreatedAt,
+            record.DocumentDeleteAt,
+            record.Error,
+            IsReplay: true);
+    }
+
+    private async Task TryEnqueueAsync(Document document)
+    {
+        try
+        {
+            await _documentProcessingQueue.EnqueueAsync(document.Id, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            // A persisted Uploaded document remains recoverable on the next process start and
+            // can also be explicitly re-enqueued through POST /api/documents/{id}/process.
+            _logger.LogError(
+                exception,
+                "Document {DocumentId} was persisted but could not be enqueued immediately.",
+                document.Id);
+        }
+    }
+
+    private (string? Key, string? Error) ResolveSingleUploadIdempotencyKey()
+    {
+        var context = _httpContextAccessor.HttpContext;
+        if (context is null
+            || !HttpMethods.IsPost(context.Request.Method)
+            || !IsSingleUploadPath(context.Request.Path))
+        {
+            return (null, null);
+        }
+
+        var values = context.Request.Headers["Idempotency-Key"];
+        if (values.Count == 0)
+            return (null, null);
+
+        if (values.Count != 1)
+            return (null, "Exactly one Idempotency-Key header value is allowed.");
+
+        return (values[0], null);
+    }
+
+    private static bool IsSingleUploadPath(PathString path)
+    {
+        return path.Equals(new PathString("/api/documents"))
+            || path.Equals(new PathString("/api/documents/"));
     }
 
     private static async Task<string?> ValidateAsync(
@@ -200,6 +527,44 @@ public sealed class DocumentIntakeService
         return validSignature
             ? null
             : "The uploaded file does not have a valid PDF signature.";
+    }
+
+    private static async Task<string> ComputeRequestFingerprintAsync(
+        IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendFingerprintComponent(hash, "docflow-intake-v1");
+        AppendFingerprintComponent(hash, file?.FileName ?? string.Empty);
+        AppendFingerprintComponent(hash, file?.ContentType ?? string.Empty);
+        AppendFingerprintComponent(
+            hash,
+            (file?.Length ?? -1).ToString(CultureInfo.InvariantCulture));
+
+        if (file is not null)
+        {
+            await using var stream = file.OpenReadStream();
+            var buffer = new byte[81920];
+            while (true)
+            {
+                var bytesRead = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
+                if (bytesRead == 0)
+                    break;
+
+                hash.AppendData(buffer.AsSpan(0, bytesRead));
+            }
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static void AppendFingerprintComponent(IncrementalHash hash, string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        Span<byte> length = stackalloc byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(length, bytes.Length);
+        hash.AppendData(length);
+        hash.AppendData(bytes);
     }
 
     private async Task TryDeleteStoredFileAsync(string storageKey)

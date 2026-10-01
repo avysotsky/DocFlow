@@ -163,6 +163,60 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("ExtractionResults", (string)null);
                 });
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.IntakeIdempotencyRecord", b =>
+                {
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DocumentCreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DocumentDeleteAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DocumentStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("CustomerId", "Key");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("IntakeIdempotencyRecords", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.DocumentReview", b =>
                 {
                     b.HasOne("DocFlow.Domain.Entities.Document", null)

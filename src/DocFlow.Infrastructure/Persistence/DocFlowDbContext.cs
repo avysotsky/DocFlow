@@ -13,6 +13,7 @@ public sealed class DocFlowDbContext : DbContext
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<ExtractionResult> ExtractionResults => Set<ExtractionResult>();
     public DbSet<DocumentReview> DocumentReviews => Set<DocumentReview>();
+    public DbSet<IntakeIdempotencyRecord> IntakeIdempotencyRecords => Set<IntakeIdempotencyRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -1,6 +1,7 @@
 using DocFlow.Api.Authentication;
 using DocFlow.Api.BackgroundServices;
 using DocFlow.Api.Documents;
+using DocFlow.Api.Middleware;
 using DocFlow.Api.Observability;
 using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
@@ -18,6 +19,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHttpContextAccessor();
 
 var apiKeyOptions = builder.Services
     .AddOptions<ApiKeyAuthenticationOptions>()
@@ -65,6 +67,14 @@ builder.Services
     .Validate(
         options => options.BatchSize is >= 1 and <= 1000,
         "Retention BatchSize must be between 1 and 1000.")
+    .ValidateOnStart();
+
+builder.Services
+    .AddOptions<DocumentIntakeIdempotencyOptions>()
+    .Bind(builder.Configuration.GetSection(DocumentIntakeIdempotencyOptions.ConfigurationSection))
+    .Validate(
+        options => options.RetentionHours is >= 1 and <= 720,
+        "Intake idempotency RetentionHours must be between 1 and 720.")
     .ValidateOnStart();
 
 builder.Services
@@ -141,6 +151,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseMiddleware<IntakeIdempotencyConflictMiddleware>();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();

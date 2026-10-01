@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Verify authenticated tenant-scoped inbox, diagnostics, and bounded batch intake."""
+"""Verify authenticated tenant-scoped inbox, diagnostics, batch intake, and intake idempotency."""
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import time
 import urllib.error
@@ -11,6 +12,15 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+
+
+def parse_body(payload: bytes) -> object | None:
+    if not payload:
+        return None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return payload.decode("utf-8", errors="replace")
 
 
 def request_json(
@@ -24,24 +34,32 @@ def request_json(
     request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-            return response.status, json.loads(payload) if payload else None
+            return response.status, parse_body(response.read())
     except urllib.error.HTTPError as error:
-        payload = error.read()
-        parsed = None
-        if payload:
-            try:
-                parsed = json.loads(payload)
-            except json.JSONDecodeError:
-                parsed = payload.decode("utf-8", errors="replace")
-        return error.code, parsed
+        return error.code, parse_body(error.read())
 
 
-def request_multipart(
+def request_method(
+    method: str,
     url: str,
     api_key: str,
-    files: list[tuple[str, str, bytes]],
 ) -> tuple[int, object | None]:
+    request = urllib.request.Request(
+        url,
+        headers={"X-DocFlow-Api-Key": api_key},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, parse_body(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, parse_body(error.read())
+
+
+def build_multipart_body(
+    field_name: str,
+    files: list[tuple[str, str, bytes]],
+) -> tuple[str, bytes]:
     boundary = f"----docflow-e2e-{uuid.uuid4().hex}"
     body = bytearray()
 
@@ -49,7 +67,7 @@ def request_multipart(
         body.extend(f"--{boundary}\r\n".encode())
         body.extend(
             (
-                'Content-Disposition: form-data; name="Files"; '
+                f'Content-Disposition: form-data; name="{field_name}"; '
                 f'filename="{file_name}"\r\n'
             ).encode()
         )
@@ -58,10 +76,18 @@ def request_multipart(
         body.extend(b"\r\n")
 
     body.extend(f"--{boundary}--\r\n".encode())
+    return boundary, bytes(body)
 
+
+def request_multipart(
+    url: str,
+    api_key: str,
+    files: list[tuple[str, str, bytes]],
+) -> tuple[int, object | None]:
+    boundary, body = build_multipart_body("Files", files)
     request = urllib.request.Request(
         url,
-        data=bytes(body),
+        data=body,
         headers={
             "X-DocFlow-Api-Key": api_key,
             "Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -71,17 +97,48 @@ def request_multipart(
 
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-            return response.status, json.loads(payload) if payload else None
+            return response.status, parse_body(response.read())
     except urllib.error.HTTPError as error:
-        payload = error.read()
-        parsed = None
-        if payload:
-            try:
-                parsed = json.loads(payload)
-            except json.JSONDecodeError:
-                parsed = payload.decode("utf-8", errors="replace")
-        return error.code, parsed
+        return error.code, parse_body(error.read())
+
+
+def request_single_upload(
+    base_url: str,
+    api_key: str,
+    idempotency_key: str,
+    payload: bytes,
+    *,
+    file_name: str = "idempotency.pdf",
+    content_type: str = "application/pdf",
+) -> tuple[int, object | None, dict[str, str]]:
+    boundary, body = build_multipart_body(
+        "File",
+        [(file_name, content_type, payload)],
+    )
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/documents",
+        data=body,
+        headers={
+            "X-DocFlow-Api-Key": api_key,
+            "Idempotency-Key": idempotency_key,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return (
+                response.status,
+                parse_body(response.read()),
+                {key.lower(): value for key, value in response.headers.items()},
+            )
+    except urllib.error.HTTPError as error:
+        return (
+            error.code,
+            parse_body(error.read()),
+            {key.lower(): value for key, value in error.headers.items()},
+        )
 
 
 def get_inbox(
@@ -124,6 +181,128 @@ def wait_for_terminal_status(base_url: str, api_key: str, document_id: str) -> s
 def assert_in_descending_created_order(items: list[dict[str, object]]) -> None:
     created = [str(item["createdAt"]) for item in items]
     assert created == sorted(created, reverse=True), created
+
+
+def verify_intake_idempotency(base_url: str, api_key: str, other_api_key: str) -> None:
+    valid_pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
+    different_pdf = b"%PDF-1.4\n1 0 obj\n<</Type /Catalog>>\nendobj\n%%EOF\n"
+
+    key = f"e2e-idempotency-{uuid.uuid4().hex}"
+    first_status, first, first_headers = request_single_upload(
+        base_url,
+        api_key,
+        key,
+        valid_pdf,
+    )
+    assert first_status == 201 and isinstance(first, dict), (first_status, first)
+    assert "idempotency-replayed" not in first_headers, first_headers
+
+    replay_status, replay, replay_headers = request_single_upload(
+        base_url,
+        api_key,
+        key,
+        valid_pdf,
+    )
+    assert replay_status == 201 and replay == first, (replay_status, replay, first)
+    assert replay_headers.get("idempotency-replayed") == "true", replay_headers
+
+    conflict_status, conflict, _ = request_single_upload(
+        base_url,
+        api_key,
+        key,
+        different_pdf,
+    )
+    assert conflict_status == 409, (conflict_status, conflict)
+
+    other_status, other, other_headers = request_single_upload(
+        base_url,
+        other_api_key,
+        key,
+        valid_pdf,
+    )
+    assert other_status == 201 and isinstance(other, dict), (other_status, other)
+    assert other["id"] != first["id"], (other, first)
+    assert "idempotency-replayed" not in other_headers, other_headers
+
+    rejected_key = f"e2e-idempotency-rejected-{uuid.uuid4().hex}"
+    rejected_status, rejected, rejected_headers = request_single_upload(
+        base_url,
+        api_key,
+        rejected_key,
+        b"not-a-pdf",
+        file_name="invalid.pdf",
+    )
+    assert rejected_status == 400, (rejected_status, rejected)
+    assert "idempotency-replayed" not in rejected_headers, rejected_headers
+
+    rejected_replay_status, rejected_replay, rejected_replay_headers = request_single_upload(
+        base_url,
+        api_key,
+        rejected_key,
+        b"not-a-pdf",
+        file_name="invalid.pdf",
+    )
+    assert rejected_replay_status == 400, (rejected_replay_status, rejected_replay)
+    assert rejected_replay == rejected, (rejected_replay, rejected)
+    assert rejected_replay_headers.get("idempotency-replayed") == "true", rejected_replay_headers
+
+    concurrent_key = f"e2e-idempotency-concurrent-{uuid.uuid4().hex}"
+
+    def concurrent_upload() -> tuple[int, object | None, dict[str, str]]:
+        return request_single_upload(
+            base_url,
+            api_key,
+            concurrent_key,
+            valid_pdf,
+            file_name="concurrent.pdf",
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        concurrent_results = list(executor.map(lambda _: concurrent_upload(), range(2)))
+
+    assert all(status == 201 for status, _, _ in concurrent_results), concurrent_results
+    concurrent_payloads = [payload for _, payload, _ in concurrent_results]
+    assert all(isinstance(payload, dict) for payload in concurrent_payloads), concurrent_payloads
+    concurrent_ids = {payload["id"] for payload in concurrent_payloads if isinstance(payload, dict)}
+    assert len(concurrent_ids) == 1, concurrent_results
+    replay_flags = [
+        headers.get("idempotency-replayed") == "true"
+        for _, _, headers in concurrent_results
+    ]
+    assert replay_flags.count(True) == 1, concurrent_results
+
+    original_document_id = str(first["id"])
+    terminal_status = wait_for_terminal_status(base_url, api_key, original_document_id)
+    assert terminal_status in {"Processed", "NeedsReview", "Failed"}, terminal_status
+
+    delete_status, _ = request_method(
+        "DELETE",
+        f"{base_url.rstrip('/')}/api/documents/{original_document_id}",
+        api_key,
+    )
+    assert delete_status == 204, delete_status
+
+    deleted_status, _ = request_json(
+        f"{base_url.rstrip('/')}/api/documents/{original_document_id}",
+        api_key,
+    )
+    assert deleted_status == 404, deleted_status
+
+    post_delete_replay_status, post_delete_replay, post_delete_headers = request_single_upload(
+        base_url,
+        api_key,
+        key,
+        valid_pdf,
+    )
+    assert post_delete_replay_status == 201, post_delete_replay_status
+    assert post_delete_replay == first, (post_delete_replay, first)
+    assert post_delete_headers.get("idempotency-replayed") == "true", post_delete_headers
+
+    still_deleted_status, _ = request_json(
+        f"{base_url.rstrip('/')}/api/documents/{original_document_id}",
+        api_key,
+    )
+    assert still_deleted_status == 404, still_deleted_status
 
 
 def verify_batch_intake(base_url: str, api_key: str, other_api_key: str) -> None:
@@ -371,12 +550,13 @@ def main() -> None:
         invalid_status, _ = get_inbox(args.base_url, args.api_key, params)
         assert invalid_status == 400, (params, invalid_status)
 
+    verify_intake_idempotency(args.base_url, args.api_key, args.other_api_key)
     verify_batch_intake(args.base_url, args.api_key, args.other_api_key)
 
     print(
-        "Document inbox/auth/batch E2E passed: 401 authentication, claim-derived tenant scope, "
-        "cross-tenant 404 isolation, bounded processing retries/diagnostics, filters, pagination, "
-        "and independent bounded batch intake verified."
+        "Document inbox/auth/intake E2E passed: tenant isolation, processing diagnostics, "
+        "single-upload persisted idempotency, concurrent replay/conflict behavior, and bounded "
+        "partial-success batch intake verified."
     )
 
 
