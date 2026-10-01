@@ -131,7 +131,7 @@ psql_cmd -c \
   "DELETE FROM \"Documents\" WHERE \"Id\" IN ('$uploaded_document_id', '$processing_document_id');"
 
 psql_cmd -c \
-  "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$uploaded_document_id', '$customer_id', 'restart-uploaded.pdf', 'application/pdf', 'recovery/uploaded.pdf', 1, 'Uploaded', NOW());"
+  "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$uploaded_document_id', '$customer_id', '../restart-uploaded.pdf', 'application/pdf', 'recovery/uploaded.pdf', 1, 'Uploaded', NOW());"
 
 psql_cmd -c \
   "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\", \"ProcessingAttempts\", \"LastProcessingAttemptAt\") VALUES ('$processing_document_id', '$customer_id', 'restart-processing.pdf', 'application/pdf', 'recovery/processing.pdf', 1, 'Processing', NOW(), 1, NOW());"
@@ -178,7 +178,30 @@ test "$recovery_result_count" = '2'
 
 echo "Restart recovery E2E passed: Uploaded and orphaned Processing work recovered after host restart without reprocessing completed documents."
 
-echo "Scenario 10: terminal document deletion removes file and cascaded data"
+echo "Scenario 10: original PDF access streams exact tenant-owned source bytes"
+
+curl -fsS \
+  -D /tmp/docflow-source-file.headers \
+  -o /tmp/docflow-source-file.pdf \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  "$base_url/api/documents/$uploaded_document_id/file"
+
+cmp /tmp/supplier-invoice.pdf /tmp/docflow-source-file.pdf
+grep -Eiq '^content-type: application/pdf' /tmp/docflow-source-file.headers
+grep -Eiq '^content-disposition: attachment;.*filename="?restart-uploaded\.pdf"?' /tmp/docflow-source-file.headers
+
+range_code=$(curl -sS \
+  -o /tmp/docflow-source-range.bin \
+  -w '%{http_code}' \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -H 'Range: bytes=0-4' \
+  "$base_url/api/documents/$uploaded_document_id/file")
+test "$range_code" = '206'
+test "$(cat /tmp/docflow-source-range.bin)" = '%PDF-'
+
+echo "Original PDF access base checks passed: bytes, headers, safe filename and range response verified."
+
+echo "Scenario 11: terminal document deletion removes file and cascaded data"
 
 uploaded_result_id=$(psql_cmd -At -c \
   "SELECT \"Id\" FROM \"ExtractionResults\" WHERE \"DocumentId\" = '$uploaded_document_id';")
@@ -198,6 +221,21 @@ psql_cmd -c \
   "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$failed_delete_document_id', '$customer_id', 'delete-failed.pdf', 'application/pdf', 'recovery/missing-failed.pdf', 1, 'Failed', NOW());"
 psql_cmd -c \
   "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$other_fixture_document_id', '$other_customer_id', 'delete-other-tenant.pdf', 'application/pdf', 'recovery/other-tenant.pdf', 1, 'Processed', NOW());"
+
+cross_tenant_file_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  "$base_url/api/documents/$other_fixture_document_id/file")
+test "$cross_tenant_file_code" = '404'
+
+missing_file_code=$(curl -sS \
+  -o /tmp/docflow-missing-file.json \
+  -w '%{http_code}' \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  "$base_url/api/documents/$failed_delete_document_id/file")
+test "$missing_file_code" = '500'
+printf '%s' "$(cat /tmp/docflow-missing-file.json)" | jq -e '.title == "Source document file is unavailable."' >/dev/null
+! grep -Fq "$storage_root" /tmp/docflow-missing-file.json
+! grep -Fq 'recovery/missing-failed.pdf' /tmp/docflow-missing-file.json
 
 cross_tenant_delete_code=$(http_code \
   -H "X-DocFlow-Api-Key: $api_key" \
@@ -231,6 +269,7 @@ test "$remaining_related_rows" = '0'
 
 for deleted_path in \
   "/api/documents/$uploaded_document_id" \
+  "/api/documents/$uploaded_document_id/file" \
   "/api/documents/$uploaded_document_id/processing-diagnostics" \
   "/api/documents/$uploaded_document_id/extraction-result" \
   "/api/documents/$uploaded_document_id/export?format=csv"; do
