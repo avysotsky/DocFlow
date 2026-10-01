@@ -1,5 +1,5 @@
 name: Public Reference Benchmark
-# Validation batch: French multi-rate VAT + fr-FR locale
+# Validation batch: merged GST-inclusive + French multi-rate VAT paths
 
 on:
   push:
