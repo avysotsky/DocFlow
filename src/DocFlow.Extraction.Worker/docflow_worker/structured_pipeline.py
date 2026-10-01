@@ -4,6 +4,7 @@ from docflow_worker.engines.deterministic_supplier_invoice_multipage import (
     DeterministicSupplierInvoiceMultipageEngine,
 )
 from docflow_worker.french_invoice_locale import apply_french_invoice_fallbacks
+from docflow_worker.invoice_tax_fallbacks import apply_explicit_no_vat_fallback
 from docflow_worker.models import DocumentContent, StructuredExtractionResult
 from docflow_worker.supplier_invoice_models import SupplierInvoiceData
 from docflow_worker.supplier_quotation_models import SupplierQuotationData
@@ -37,6 +38,7 @@ async def extract_structured_document(
             document_name=document_name,
         )
         invoice = SupplierInvoiceData.model_validate(result.data)
+        apply_explicit_no_vat_fallback(content.text, invoice)
         apply_french_invoice_fallbacks(content.text, invoice)
         result.data = invoice.model_dump()
         validation = SupplierInvoiceValidator().validate(invoice)
