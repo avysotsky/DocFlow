@@ -1,16 +1,17 @@
 name: Scanned OCR E2E
-# Milestone validation: 1.1.1.7 DegradedOCR closure
+# Regression validation for the scanned upload-to-persistence path.
 
 on:
   push:
     branches:
       - 'DocFlow/v_*'
     paths:
-      - 'src/DocFlow.Api/**'
-      - 'src/DocFlow.Application/**'
-      - 'src/DocFlow.Domain/**'
-      - 'src/DocFlow.Infrastructure/**'
       - 'src/DocFlow.Extraction.Worker/**'
+      - 'src/DocFlow.Infrastructure/Processing/**'
+      - 'src/DocFlow.Application/Abstractions/IDocumentExtractionRunner.cs'
+      - 'src/DocFlow.Application/Abstractions/IDocumentProcessingQueue.cs'
+      - 'src/DocFlow.Application/Abstractions/IDocumentProcessingService.cs'
+      - 'src/DocFlow.Api/BackgroundServices/DocumentProcessingBackgroundService.cs'
       - '.github/scripts/generate_supplier_quotation_pdf.py'
       - '.github/scripts/rasterize_pdf.py'
       - '.github/workflows/scanned-ocr-e2e.yml'
@@ -99,6 +100,9 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Development
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__DocFlowDbContext: Host=127.0.0.1;Port=5432;Database=docflow;Username=postgres;Password=postgres
+          Authentication__ApiKey__Clients__0__Name: scanned-ocr-e2e
+          Authentication__ApiKey__Clients__0__CustomerId: 11111111-1111-1111-1111-111111111111
+          Authentication__ApiKey__Clients__0__ApiKey: docflow-scanned-ocr-e2e-key
         run: |
           set -euo pipefail
 
@@ -130,9 +134,12 @@ jobs:
             exit 1
           fi
 
+          api_key='docflow-scanned-ocr-e2e-key'
+          auth_header=(-H "X-DocFlow-Api-Key: $api_key")
+
           upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
             -X POST \
-            -F 'CustomerId=11111111-1111-1111-1111-111111111111' \
             -F 'File=@/tmp/scanned-supplier-quotation.pdf;type=application/pdf' \
             http://127.0.0.1:5080/api/documents)
 
@@ -142,7 +149,9 @@ jobs:
 
           final_status=""
           for _ in $(seq 1 60); do
-            document_json=$(curl -fsS "http://127.0.0.1:5080/api/documents/$document_id")
+            document_json=$(curl -fsS \
+              "${auth_header[@]}" \
+              "http://127.0.0.1:5080/api/documents/$document_id")
             final_status=$(printf '%s' "$document_json" | jq -r '.status')
             case "$final_status" in
               Processed|NeedsReview|Failed)
@@ -159,6 +168,7 @@ jobs:
           fi
 
           result_json=$(curl -fsS \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$document_id/extraction-result")
           echo "Scanned quotation extraction result:"
           printf '%s' "$result_json" | jq .

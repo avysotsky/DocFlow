@@ -1,90 +1,192 @@
 # DocFlow — handoff v1.1.1.11 ApiKeyAuth
 
-Status: **ACTIVE**  
+Status: **COMPLETED**  
 Repository: `avysotsky/DocFlow`  
 Branch: `DocFlow/v_1.1.1.11_ApiKeyAuth`  
 Base: `DocFlow/v_1.1.1.10_DocumentReview`
 
-## 1. Why this milestone exists
+## 1. Milestone result
 
-The current API already stores `Document.CustomerId` and the document inbox is customer-scoped, but the customer identity is supplied by the caller in request data. Other document endpoints accept only a `documentId` and do not verify tenant ownership.
+`v1.1.1.11` closes the MVP tenant/authentication gap that remained after the customer-scoped document inbox and review flow.
 
-That means tenant isolation is not yet an authentication/authorization boundary.
+Before this milestone, `Document.CustomerId` existed in persistence but the caller supplied customer identity in request data, while several document-id endpoints did not verify tenant ownership. That was not a security boundary.
 
-This milestone closes that MVP product gap before adding more extraction rules or UI features.
-
-## 2. Scope
-
-Implement a minimal provider-agnostic API-key authentication boundary for customer-facing document APIs.
-
-Target behavior:
+The customer-facing document API now uses this boundary:
 
 ```text
 X-DocFlow-Api-Key
-  -> authenticate configured API client
-  -> trusted customer_id claim
-  -> document upload/list/read/process/result/review/export
-     are limited to that customer
+  -> configured API client
+  -> trusted docflow:customer_id claim
+  -> tenant-scoped document API
 ```
 
-Rules:
+Implementation commit:
 
-- `CustomerId` is derived from authenticated identity, not accepted as authoritative request input.
-- Cross-tenant access by `documentId` returns `404` so resource existence is not disclosed.
-- Missing/invalid API key returns `401`.
-- API keys are configuration/secrets, never committed with real values.
+```text
+0c9bbd0197c61109400e4f8cda52dfb14bf59a47
+Add tenant API-key authentication and authorization
+```
+
+Validation:
+
+```text
+Automation E2E #100
+GitHub Actions run 36851050242
+conclusion: success
+head: 0c9bbd0197c61109400e4f8cda52dfb14bf59a47
+```
+
+## 2. Implemented behavior
+
+### Authentication
+
+- Customer-facing document endpoints require `X-DocFlow-Api-Key`.
+- Missing key -> `401`.
+- Invalid key -> `401`.
 - Multiple configured API clients/customers are supported.
-- No user/password system, OAuth/OIDC provider, refresh tokens, UI login, RBAC administration, or customer-management UI in this milestone.
-- An API-key client identifies a tenant/client integration, not necessarily an individual human reviewer. Do not fabricate `ReviewedBy` from it.
+- Keys are compared with a fixed-time comparison.
+- Repository `appsettings.json` contains no real API keys.
+- Runtime keys should come from environment variables, user-secrets, or a production secret store.
 
-## 3. Planned implementation block
+### Trusted tenant identity
 
-1. Add API-key authentication handler/options/claims helper in `DocFlow.Api`.
-2. Register authentication + authorization in `Program.cs`.
-3. Protect document, export, and review controllers with `[Authorize]`.
-4. Remove request-supplied `CustomerId` from upload/list as the ownership source.
-5. Add tenant ownership filters for id-based reads/actions.
-6. Update Automation E2E and its helper scripts to send API keys and verify:
-   - unauthenticated request -> `401`;
-   - primary tenant sees only its documents;
-   - primary tenant cannot read another tenant document -> `404`;
-   - second tenant can read its own document;
-   - existing upload/process/export/review flows remain green.
-7. Run one Automation E2E validation at the end of the block.
+Each configured API client maps to a `CustomerId`. Successful authentication creates the trusted claim:
 
-## 4. Configuration contract
-
-Expected configuration shape:
-
-```json
-{
-  "Authentication": {
-    "ApiKey": {
-      "HeaderName": "X-DocFlow-Api-Key",
-      "Clients": [
-        {
-          "Name": "customer-a",
-          "CustomerId": "11111111-1111-1111-1111-111111111111",
-          "ApiKey": "<secret>"
-        }
-      ]
-    }
-  }
-}
+```text
+docflow:customer_id
 ```
 
-Repository `appsettings.json` must not contain real API keys. Runtime secrets should come from environment variables, user-secrets, or a production secret store.
+Upload and inbox/list derive customer ownership from that claim. Request-supplied `CustomerId` is no longer authoritative.
 
-## 5. Out of scope / later hardening
+### Tenant authorization
 
-- OIDC/Auth0/Entra/Keycloak integration;
-- end-user accounts and password lifecycle;
-- per-user review audit identity;
-- API-key provisioning/rotation endpoints;
-- roles/permissions beyond tenant ownership;
+The following customer-facing operations are tenant-scoped:
+
+```text
+POST /api/documents
+GET  /api/documents
+GET  /api/documents/{id}
+POST /api/documents/{id}/process
+GET  /api/documents/{id}/extraction-result
+POST /api/documents/{id}/extraction-result
+PUT  /api/documents/{id}/review
+GET  /api/documents/{id}/export
+```
+
+For id-based operations, a document belonging to another customer is treated as not found:
+
+```text
+cross-tenant document id -> 404
+```
+
+This avoids disclosing whether another tenant's resource exists.
+
+## 3. Main code changes
+
+### `DocFlow.Api`
+
+Added:
+
+```text
+Authentication/ApiKeyAuthentication.cs
+```
+
+It contains:
+
+- authentication scheme constants;
+- API-key configuration models;
+- API-key authentication handler;
+- `docflow:customer_id` claim creation;
+- `ClaimsPrincipal.GetRequiredCustomerId()` helper.
+
+Updated:
+
+```text
+Program.cs
+Controllers/DocumentsController.cs
+Controllers/DocumentReviewsController.cs
+Controllers/DocumentExportsController.cs
+appsettings.json
+```
+
+`Program.cs` now registers authentication/authorization and runs both middleware components before controller mapping.
+
+## 4. E2E coverage added
+
+Automation E2E now proves all of the following in one workflow:
+
+- unauthenticated document request -> `401`;
+- invalid API key -> `401`;
+- primary customer sees only primary-customer documents;
+- adding a `customerId` query parameter cannot switch tenant identity;
+- primary customer GET of another tenant's document -> `404`;
+- second tenant can read its own document;
+- second tenant's inbox is isolated;
+- existing quotation/invoice processing remains functional;
+- idempotent processing remains functional;
+- `NeedsReview` and `Failed` routing remains functional;
+- CSV/XLSX export remains functional;
+- human review remains functional.
+
+Updated E2E helpers authenticate all API requests:
+
+```text
+.github/scripts/verify_document_export.py
+.github/scripts/verify_document_inbox.py
+.github/scripts/verify_document_review.py
+```
+
+## 5. CI hygiene discovered during this milestone
+
+The legacy `Scanned OCR E2E` path filter was broad enough that an API-auth-only change triggered the expensive OCR workflow even though OCR behavior was unchanged.
+
+The closing maintenance commit narrows that workflow to extraction/processing/OCR-related files instead of all API/Application/Domain/Infrastructure files. It also authenticates the scanned E2E API calls so the workflow remains compatible with the new mandatory API-key boundary when it is legitimately triggered later.
+
+Do not use Scanned OCR E2E as a validation gate for ordinary auth/API/UI work. Run it when the OCR/extraction processing path changes.
+
+## 6. Deliberately out of scope
+
+This is intentionally an MVP integration/tenant authentication boundary, not a full identity platform.
+
+Still out of scope:
+
+- OIDC/Auth0/Entra/Keycloak;
+- end-user username/password accounts;
+- refresh/access-token lifecycle;
+- per-human reviewer identity;
+- RBAC/permissions administration;
+- API-key provisioning or rotation endpoints;
 - rate limiting;
-- moving internal processing callbacks to a separate service-auth policy.
+- service-to-service authentication policies separate from customer auth.
 
-## 6. Validation discipline
+In particular, an API-key client represents a tenant/client integration, not necessarily an individual human reviewer. Do not populate `ReviewedBy` with the API client name and call that user-level audit identity.
 
-Follow the existing project rule: batch the implementation and run the narrowest relevant workflow once. Do not run Public Reference Benchmark or Scanned OCR E2E because extraction/OCR behavior is unchanged.
+## 7. Current MVP state after v1.1.1.11
+
+DocFlow now has a coherent end-to-end MVP path:
+
+```text
+authenticated tenant
+  -> upload PDF
+  -> digital/OCR processing
+  -> detect invoice/quotation
+  -> deterministic extraction + validation
+  -> persistence
+  -> tenant-scoped inbox
+  -> optional human review
+  -> tenant-scoped CSV/XLSX export
+```
+
+## 8. Recommended next milestone selection
+
+Do not automatically add more extraction rules without measured failures.
+
+Choose the next block from an actual product/operational gap. Strong candidates are:
+
+1. **Reviewer/audit identity** — if human review must be attributable to individual users.
+2. **Deployability/configuration** — production container/config/secret setup and health/readiness behavior.
+3. **Observability/retries** — durable failure visibility and controlled retry behavior.
+4. **Retention/delete** — explicit document lifecycle and data deletion.
+5. **Batch intake** — only if real customer workflow requires multi-document ingestion.
+
+Preserve the CI discipline from the previous handoffs: make coherent implementation blocks, use `[skip ci]` for documentation/intermediate maintenance commits, and run the narrowest relevant validation once at the end.
