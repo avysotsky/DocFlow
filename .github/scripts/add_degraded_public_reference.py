@@ -149,8 +149,9 @@ def main() -> None:
             "metadata": {
                 "supplier": SOURCE["supplier"],
                 "customer": SOURCE["customer"],
-                "source_kind": "scanned-image",
+                "source_kind": "scanned",
                 "source_format": "jpeg",
+                "original_source_kind": "scanned-image",
                 "source_image_sha256": image_sha,
                 "source_url": SOURCE["image_url"],
                 "provenance_url": SOURCE["provenance_url"],
@@ -188,7 +189,8 @@ def main() -> None:
             "provenance_url": SOURCE["provenance_url"],
             "supplier": SOURCE["supplier"],
             "status": "ok",
-            "source_kind": "scanned-image",
+            "source_kind": "scanned",
+            "original_source_kind": "scanned-image",
             "source_format": "jpeg",
             "source_image_sha256": image_sha,
             "sha256": pdf_sha,
@@ -219,7 +221,8 @@ def main() -> None:
         json.dumps(
             {
                 "id": SOURCE["id"],
-                "source_kind": "scanned-image",
+                "source_kind": "scanned",
+                "original_source_kind": "scanned-image",
                 "source_image_sha256": image_sha,
                 "pdf_sha256": pdf_sha,
                 "image_size": [width, height],
