@@ -13,6 +13,7 @@ on:
       - 'src/DocFlow.Extraction.Worker/**'
       - '.github/scripts/generate_supplier_quotation_pdf.py'
       - '.github/scripts/generate_supplier_invoice_pdf.py'
+      - '.github/scripts/verify_document_export.py'
       - '.github/workflows/automation-e2e.yml'
   workflow_dispatch:
 
@@ -302,4 +303,10 @@ jobs:
             and (.structuredData.data.items | length) == 5
           ' >/dev/null
 
-          echo "Automation E2E passed: quotations, idempotency, review/failure routing, borderless layout and supplier invoice verified."
+          echo "Scenario 7: persisted extraction result exports to CSV and XLSX"
+          python .github/scripts/verify_document_export.py \
+            --base-url http://127.0.0.1:5080 \
+            --document-id "$invoice_document_id" \
+            --document-without-result-id "$failed_document_id"
+
+          echo "Automation E2E passed: quotations, idempotency, review/failure routing, borderless layout, supplier invoice and CSV/XLSX export verified."
