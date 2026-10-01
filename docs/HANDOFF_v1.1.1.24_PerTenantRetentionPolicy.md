@@ -1,65 +1,130 @@
 # DocFlow — handoff v1.1.1.24 Per-Tenant Retention Policy
 
-Status: **ACTIVE**  
+Status: **COMPLETED**  
 Repository: `avysotsky/DocFlow`  
 Branch: `DocFlow/v_1.1.1.24_PerTenantRetentionPolicy`  
 Base: `DocFlow/v_1.1.1.23_BatchIdempotency`
 
-## Goal
+## Implementation
 
-Allow trusted tenant-specific retention policy overrides without introducing a general tenant-management subsystem.
-
-## Selected contract
-
-Deployment-wide defaults remain:
+Authoritative implementation commit:
 
 ```text
-Retention.Enabled
-Retention.DefaultRetentionDays
+13d9b60ffa357e844b46aefbebe99ee299a4d3e9
+Add per-tenant retention policy overrides
 ```
 
-Optional configuration overrides are keyed by trusted `CustomerId`:
+No database migration was required.
+
+## Retention configuration
+
+Deployment-wide defaults remain authoritative fallbacks:
 
 ```json
-"TenantOverrides": [
-  {
-    "CustomerId": "...",
-    "Enabled": true,
-    "RetentionDays": 90
+{
+  "Retention": {
+    "Enabled": false,
+    "DefaultRetentionDays": 30,
+    "SweepIntervalSeconds": 3600,
+    "BatchSize": 100,
+    "TenantOverrides": []
   }
-]
+}
 ```
 
-Both override fields are optional. Effective policy is:
+A tenant override is keyed only by trusted `CustomerId`:
+
+```json
+{
+  "CustomerId": "11111111-1111-1111-1111-111111111111",
+  "Enabled": true,
+  "RetentionDays": 90
+}
+```
+
+`Enabled` and `RetentionDays` are independently optional.
+
+Effective policy:
 
 ```text
-effective Enabled = tenant.Enabled ?? global.Enabled
-effective RetentionDays = tenant.RetentionDays ?? global.DefaultRetentionDays
+Enabled = tenant.Enabled ?? global.Enabled
+RetentionDays = tenant.RetentionDays ?? global.DefaultRetentionDays
 ```
 
-The request payload never controls retention.
+The request body never controls retention.
 
 ## Persistence semantics
 
-The effective policy is evaluated only when a new document is accepted. `DeleteAt` remains the durable decision stored on the document.
+`DocumentIntakeService` resolves the effective tenant policy when an accepted document is created and persists the resulting `DeleteAt` on the `Document`.
 
-Existing documents are not recalculated when configuration changes. A persisted `DeleteAt` continues to be honored by the existing terminal-only retention sweep.
+Existing documents are intentionally not recalculated when configuration changes. Their persisted `DeleteAt` remains the lifecycle decision honored by retention cleanup.
 
-## Safety
+Single and batch intake both use the same `DocumentIntakeService`, so the tenant retention policy applies consistently to both paths.
 
-- validate non-empty unique override CustomerIds;
-- validate optional RetentionDays in the existing 1..3650 range;
-- reject empty/no-op override entries;
-- run the retention hosted service when the global policy is enabled or any tenant explicitly enables retention;
-- keep automatic deletion limited to terminal `Processed`, `NeedsReview`, and `Failed` rows with expired `DeleteAt`;
-- do not add DB tenant configuration or request-level retention controls.
+## Startup validation
 
-## Acceptance
+The host now rejects invalid tenant override configuration when:
 
-- no override preserves current global behavior;
-- tenant can override retention days while inheriting global enabled state;
-- tenant can explicitly disable automatic retention while global retention is enabled;
-- upload response/persisted document receives the effective `DeleteAt`;
-- existing documents keep existing `DeleteAt`;
-- restart/retention regression remains green;
-- .NET CI + Automation E2E green.
+```text
+CustomerId is empty
+CustomerId appears more than once
+RetentionDays is outside 1..3650
+an override sets neither Enabled nor RetentionDays
+```
+
+## Sweep behavior
+
+The retention hosted service starts when either:
+
+```text
+global Retention.Enabled == true
+or at least one tenant override explicitly has Enabled == true
+```
+
+This allows a tenant to opt into retention even while the deployment default is disabled.
+
+The deletion query itself remains unchanged and only considers persisted rows where:
+
+```text
+DeleteAt <= now
+and Status in (Processed, NeedsReview, Failed)
+```
+
+`Uploaded` and `Processing` documents are never automatically deleted.
+
+A tenant that disables retention affects newly accepted documents by receiving `DeleteAt = null`. Existing documents that already have `DeleteAt` keep it and remain eligible when it expires.
+
+## E2E proof
+
+Automation E2E restart/lifecycle configuration used:
+
+```text
+global Enabled = true
+global DefaultRetentionDays = 7
+primary tenant override RetentionDays = 2, Enabled inherited
+second tenant override Enabled = false
+```
+
+The test proved:
+
+```text
+primary upload -> future DeleteAt approximately +2 days
+second-tenant upload -> DeleteAt == null
+previous default-off documents remained without DeleteAt
+both tenant uploads processed successfully
+existing restart recovery still passed
+terminal-only retention sweep still passed
+```
+
+## Final validation
+
+```text
+.NET CI #39 -> success (run 36908516866)
+Automation E2E #115 -> success (run 36908516614)
+```
+
+No Deployment Smoke, Scanned OCR E2E or Public Reference Benchmark was triggered because deployment/extraction behavior did not change.
+
+## Scope boundary
+
+This is configuration-backed tenant policy, not a tenant administration subsystem. There is no customer-facing endpoint for changing retention and no DB policy table. That remains appropriate for the current API-key tenant model.
