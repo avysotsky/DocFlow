@@ -3,6 +3,7 @@ using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace DocFlow.Infrastructure.Processing;
 
@@ -58,7 +59,18 @@ public sealed class DocumentReviewService : IDocumentReviewService
         _dbContext.DocumentReviews.Add(review);
         document.MarkProcessed(document.DocumentType);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+            when (exception.InnerException is PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation
+            })
+        {
+            return new DocumentReviewResult(DocumentReviewOutcome.AlreadyReviewed);
+        }
 
         return new DocumentReviewResult(
             DocumentReviewOutcome.Reviewed,
