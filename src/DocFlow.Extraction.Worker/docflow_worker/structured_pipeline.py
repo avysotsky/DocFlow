@@ -1,7 +1,7 @@
 from docflow_worker.document_type_detector import detect_document_type
 from docflow_worker.engines import DeterministicSupplierQuotationEngine
-from docflow_worker.engines.deterministic_supplier_invoice_discount import (
-    DeterministicSupplierInvoiceDiscountEngine,
+from docflow_worker.engines.deterministic_supplier_invoice_multipage import (
+    DeterministicSupplierInvoiceMultipageEngine,
 )
 from docflow_worker.models import DocumentContent, StructuredExtractionResult
 from docflow_worker.supplier_invoice_models import SupplierInvoiceData
@@ -31,7 +31,7 @@ async def extract_structured_document(
         quotation = SupplierQuotationData.model_validate(result.data)
         validation = SupplierQuotationValidator().validate(quotation)
     elif resolved_document_type == "supplier_invoice":
-        result = await DeterministicSupplierInvoiceDiscountEngine().extract(
+        result = await DeterministicSupplierInvoiceMultipageEngine().extract(
             content,
             document_name=document_name,
         )

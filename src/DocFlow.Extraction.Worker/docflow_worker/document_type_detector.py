@@ -40,6 +40,7 @@ def detect_document_type(content: DocumentContent) -> str:
     invoice_markers = (
         "invoice no",
         "invoice number",
+        "invoice #",
         "invoice date",
         "due date",
         "payment due",
