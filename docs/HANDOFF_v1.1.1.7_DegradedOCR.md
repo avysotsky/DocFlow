@@ -1,7 +1,7 @@
-# DocFlow — active handoff for 1.1.1.7 DegradedOCR
+# DocFlow — completed handoff for 1.1.1.7 DegradedOCR
 
-Status: **READY FOR MILESTONE CLOSURE**  
-Working branch: `DocFlow/v_1.1.1.7_DegradedOCR`  
+Status: **COMPLETED**  
+Completed branch: `DocFlow/v_1.1.1.7_DegradedOCR`  
 Started from completed milestone: `DocFlow/v_1.1.1.6_HardCases`
 
 ## 1. Starting evidence
@@ -166,15 +166,33 @@ ONNX/LLM remains **not justified** by this milestone.
 
 The measured failure was recoverable deterministically from OCR/layout evidence. No semantic failure remains that would justify adding model inference cost or nondeterminism.
 
-## 10. CI discipline and closure
+## 10. Milestone-level closure validation
 
-Intermediate implementation/test commits used `[skip ci]`. Public Reference was run only for measured checkpoints and final validation.
-
-Before marking this milestone completed, run milestone-level validation once:
+A single bundled closure push triggered only the two intended E2E workflows:
 
 ```text
-Automation E2E
-Scanned OCR E2E
+Automation E2E #96: SUCCESS
+Scanned OCR E2E #73: SUCCESS
 ```
 
-Do not rerun Public Reference merely for closure; #78 is already the consolidated green reference baseline.
+Automation E2E verified upload, background processing, Python extraction, PostgreSQL persistence, idempotency, review/failure routing, borderless quotation handling and supplier-invoice processing.
+
+Scanned OCR E2E verified the full image-only upload -> OCR -> structured extraction -> persistence path.
+
+No additional Public Reference run was required after #78.
+
+## 11. Final milestone baseline
+
+```text
+Public Reference Benchmark #78: SUCCESS
+69 Python tests
+17/17 public documents
+98/98 checked fields
+17/17 document types
+17/17 validation statuses
+
+Automation E2E #96: SUCCESS
+Scanned OCR E2E #73: SUCCESS
+```
+
+Milestone `1.1.1.7 DegradedOCR` is complete.
