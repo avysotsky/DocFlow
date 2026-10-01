@@ -79,6 +79,40 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("Documents", (string)null);
                 });
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.DocumentReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CorrectedDataJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ExtractionResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId")
+                        .IsUnique();
+
+                    b.HasIndex("ExtractionResultId")
+                        .IsUnique();
+
+                    b.ToTable("DocumentReviews", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.ExtractionResult", b =>
                 {
                     b.Property<Guid>("Id")
@@ -110,6 +144,15 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("ExtractionResults", (string)null);
+                });
+
+            modelBuilder.Entity("DocFlow.Domain.Entities.DocumentReview", b =>
+                {
+                    b.HasOne("DocFlow.Domain.Entities.Document", null)
+                        .WithOne()
+                        .HasForeignKey("DocFlow.Domain.Entities.DocumentReview", "DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("DocFlow.Domain.Entities.ExtractionResult", b =>
