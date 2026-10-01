@@ -1,5 +1,5 @@
 name: Automation E2E
-# Final validation: 1.1.1.10 DocumentReview
+# Final validation: 1.1.1.11 ApiKeyAuth
 
 on:
   push:
@@ -87,6 +87,12 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Development
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__DocFlowDbContext: Host=127.0.0.1;Port=5432;Database=docflow;Username=postgres;Password=postgres
+          Authentication__ApiKey__Clients__0__Name: e2e-primary
+          Authentication__ApiKey__Clients__0__CustomerId: 11111111-1111-1111-1111-111111111111
+          Authentication__ApiKey__Clients__0__ApiKey: docflow-e2e-primary-key
+          Authentication__ApiKey__Clients__1__Name: e2e-other
+          Authentication__ApiKey__Clients__1__CustomerId: 44444444-4444-4444-4444-444444444444
+          Authentication__ApiKey__Clients__1__ApiKey: docflow-e2e-other-key
         run: |
           set -euo pipefail
 
@@ -118,13 +124,21 @@ jobs:
             exit 1
           fi
 
+          customer_id='11111111-1111-1111-1111-111111111111'
+          other_customer_id='44444444-4444-4444-4444-444444444444'
+          other_document_id='44444444-4444-4444-4444-444444444445'
+          api_key='docflow-e2e-primary-key'
+          other_api_key='docflow-e2e-other-key'
+          auth_header=(-H "X-DocFlow-Api-Key: $api_key")
+
           wait_for_terminal_status() {
             local document_id="$1"
             local status=""
 
             for _ in $(seq 1 30); do
               local document_json
-              document_json=$(curl -fsS "http://127.0.0.1:5080/api/documents/$document_id")
+              document_json=$(curl -fsS "${auth_header[@]}" \
+                "http://127.0.0.1:5080/api/documents/$document_id")
               status=$(printf '%s' "$document_json" | jq -r '.status')
 
               case "$status" in
@@ -140,14 +154,10 @@ jobs:
             printf '%s' "$status"
           }
 
-          customer_id='11111111-1111-1111-1111-111111111111'
-          other_customer_id='44444444-4444-4444-4444-444444444444'
-          other_document_id='44444444-4444-4444-4444-444444444445'
-
           echo "Scenario 1: valid quotation is processed automatically"
           upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
             -X POST \
-            -F "CustomerId=$customer_id" \
             -F 'File=@/tmp/supplier-quotation.pdf;type=application/pdf' \
             http://127.0.0.1:5080/api/documents)
 
@@ -160,6 +170,7 @@ jobs:
           test "$final_status" = "Processed"
 
           result_json=$(curl -fsS \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$document_id/extraction-result")
 
           printf '%s' "$result_json" | jq -e '
@@ -179,23 +190,26 @@ jobs:
           echo "Scenario 2: repeated enqueue is idempotent"
           for _ in 1 2; do
             process_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              "${auth_header[@]}" \
               -X POST "http://127.0.0.1:5080/api/documents/$document_id/process")
             test "$process_code" = "202"
           done
 
           sleep 2
           repeated_result_json=$(curl -fsS \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$document_id/extraction-result")
           repeated_result_id=$(printf '%s' "$repeated_result_json" | jq -r '.id')
           test "$repeated_result_id" = "$result_id"
           repeated_document_json=$(curl -fsS \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$document_id")
           test "$(printf '%s' "$repeated_document_json" | jq -r '.status')" = "Processed"
 
           echo "Scenario 3: invalid arithmetic routes to NeedsReview"
           invalid_upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
             -X POST \
-            -F "CustomerId=$customer_id" \
             -F 'File=@/tmp/invalid-supplier-quotation.pdf;type=application/pdf' \
             http://127.0.0.1:5080/api/documents)
 
@@ -204,6 +218,7 @@ jobs:
           echo "Invalid quotation final status: $invalid_status"
 
           invalid_result_json=$(curl -fsS \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$invalid_document_id/extraction-result")
           echo "Invalid quotation persisted extraction result:"
           printf '%s' "$invalid_result_json" | jq .
@@ -225,6 +240,7 @@ jobs:
             "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$failed_document_id', '$customer_id', 'missing.pdf', 'application/pdf', 'missing/missing.pdf', 1, 'Uploaded', NOW());"
 
           failed_process_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "${auth_header[@]}" \
             -X POST "http://127.0.0.1:5080/api/documents/$failed_document_id/process")
           test "$failed_process_code" = "202"
 
@@ -236,13 +252,14 @@ jobs:
           fi
 
           missing_result_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$failed_document_id/extraction-result")
           test "$missing_result_code" = "404"
 
           echo "Scenario 5: borderless digital quotation is processed automatically"
           borderless_upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
             -X POST \
-            -F "CustomerId=$customer_id" \
             -F 'File=@/tmp/borderless-supplier-quotation.pdf;type=application/pdf' \
             http://127.0.0.1:5080/api/documents)
 
@@ -255,6 +272,7 @@ jobs:
           fi
 
           borderless_result_json=$(curl -fsS \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$borderless_document_id/extraction-result")
           echo "Borderless quotation persisted extraction result:"
           printf '%s' "$borderless_result_json" | jq .
@@ -273,8 +291,8 @@ jobs:
 
           echo "Scenario 6: supplier invoice is detected and processed automatically"
           invoice_upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
             -X POST \
-            -F "CustomerId=$customer_id" \
             -F 'File=@/tmp/supplier-invoice.pdf;type=application/pdf' \
             http://127.0.0.1:5080/api/documents)
 
@@ -287,6 +305,7 @@ jobs:
           fi
 
           invoice_result_json=$(curl -fsS \
+            "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/documents/$invoice_document_id/extraction-result")
           echo "Supplier invoice persisted extraction result:"
           printf '%s' "$invoice_result_json" | jq .
@@ -312,10 +331,11 @@ jobs:
           echo "Scenario 7: persisted extraction result exports to CSV and XLSX"
           python .github/scripts/verify_document_export.py \
             --base-url http://127.0.0.1:5080 \
+            --api-key "$api_key" \
             --document-id "$invoice_document_id" \
             --document-without-result-id "$failed_document_id"
 
-          echo "Scenario 8: document inbox exposes scoped history, filters and pagination"
+          echo "Scenario 8: authenticated document inbox enforces tenant isolation"
           docker run --rm --network host \
             -e PGPASSWORD=postgres \
             postgres:16 \
@@ -324,6 +344,8 @@ jobs:
 
           python .github/scripts/verify_document_inbox.py \
             --base-url http://127.0.0.1:5080 \
+            --api-key "$api_key" \
+            --other-api-key "$other_api_key" \
             --customer-id "$customer_id" \
             --other-customer-id "$other_customer_id" \
             --other-document-id "$other_document_id" \
@@ -334,7 +356,8 @@ jobs:
           echo "Scenario 9: NeedsReview document can be human-reviewed and exported"
           python .github/scripts/verify_document_review.py \
             --base-url http://127.0.0.1:5080 \
+            --api-key "$api_key" \
             --review-document-id "$invalid_document_id" \
             --processed-document-id "$invoice_document_id"
 
-          echo "Automation E2E passed: quotations, idempotency, review/failure routing, borderless layout, supplier invoice, CSV/XLSX export, document inbox and human review verified."
+          echo "Automation E2E passed: API-key auth, tenant isolation, quotations, idempotency, review/failure routing, borderless layout, supplier invoice, CSV/XLSX export, document inbox and human review verified."

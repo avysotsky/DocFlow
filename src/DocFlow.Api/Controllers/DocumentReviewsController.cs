@@ -1,19 +1,28 @@
 using System.Text.Json;
+using DocFlow.Api.Authentication;
 using DocFlow.Application.Abstractions;
+using DocFlow.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace DocFlow.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/documents/{documentId:guid}/review")]
 public sealed class DocumentReviewsController : ControllerBase
 {
     private const int MaxReviewNoteLength = 2000;
 
+    private readonly DocFlowDbContext _dbContext;
     private readonly IDocumentReviewService _documentReviewService;
 
-    public DocumentReviewsController(IDocumentReviewService documentReviewService)
+    public DocumentReviewsController(
+        DocFlowDbContext dbContext,
+        IDocumentReviewService documentReviewService)
     {
+        _dbContext = dbContext;
         _documentReviewService = documentReviewService;
     }
 
@@ -21,6 +30,7 @@ public sealed class DocumentReviewsController : ControllerBase
     [Consumes("application/json")]
     [ProducesResponseType(typeof(DocumentReviewResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<DocumentReviewResponse>> Review(
@@ -28,6 +38,16 @@ public sealed class DocumentReviewsController : ControllerBase
         [FromBody] DocumentReviewRequest request,
         CancellationToken cancellationToken)
     {
+        var customerId = User.GetRequiredCustomerId();
+        var isOwned = await _dbContext.Documents
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Id == documentId && x.CustomerId == customerId,
+                cancellationToken);
+
+        if (!isOwned)
+            return NotFound();
+
         if (request.ExpectedExtractionResultId == Guid.Empty)
             return BadRequest("Expected extraction result id is required.");
 

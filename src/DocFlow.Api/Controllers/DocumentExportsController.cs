@@ -1,22 +1,32 @@
+using DocFlow.Api.Authentication;
 using DocFlow.Application.Abstractions;
+using DocFlow.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace DocFlow.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/documents/{documentId:guid}/export")]
 public sealed class DocumentExportsController : ControllerBase
 {
+    private readonly DocFlowDbContext _dbContext;
     private readonly IExtractionResultExportService _exportService;
 
-    public DocumentExportsController(IExtractionResultExportService exportService)
+    public DocumentExportsController(
+        DocFlowDbContext dbContext,
+        IExtractionResultExportService exportService)
     {
+        _dbContext = dbContext;
         _exportService = exportService;
     }
 
     [HttpGet]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Export(
         Guid documentId,
@@ -25,6 +35,16 @@ public sealed class DocumentExportsController : ControllerBase
     {
         if (!TryParseFormat(format, out var exportFormat))
             return BadRequest("'format' must be 'csv' or 'xlsx'.");
+
+        var customerId = User.GetRequiredCustomerId();
+        var isOwned = await _dbContext.Documents
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Id == documentId && x.CustomerId == customerId,
+                cancellationToken);
+
+        if (!isOwned)
+            return NotFound();
 
         var exported = await _exportService.ExportAsync(
             documentId,

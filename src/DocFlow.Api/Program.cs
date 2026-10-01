@@ -1,9 +1,11 @@
+using DocFlow.Api.Authentication;
 using DocFlow.Api.BackgroundServices;
 using DocFlow.Application.Abstractions;
 using DocFlow.Infrastructure.Export;
 using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
 using DocFlow.Infrastructure.Storage;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,6 +13,16 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.Configure<ApiKeyAuthenticationOptions>(
+    builder.Configuration.GetSection(ApiKeyAuthenticationDefaults.ConfigurationSection));
+
+builder.Services
+    .AddAuthentication(ApiKeyAuthenticationDefaults.Scheme)
+    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
+        ApiKeyAuthenticationDefaults.Scheme,
+        _ => { });
+builder.Services.AddAuthorization();
 
 var connectionString = builder.Configuration.GetConnectionString("DocFlowDbContext")
     ?? throw new InvalidOperationException("Connection string 'DocFlowDbContext' was not found.");
@@ -53,6 +65,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 
 app.Run();

@@ -15,10 +15,11 @@ import uuid
 def request_json(
     method: str,
     url: str,
+    api_key: str,
     payload: object | None = None,
 ) -> tuple[int, object | None]:
     data = None
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {"X-DocFlow-Api-Key": api_key}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -39,9 +40,13 @@ def request_json(
         return error.code, parsed
 
 
-def get_bytes(url: str) -> tuple[int, bytes]:
+def get_bytes(url: str, api_key: str) -> tuple[int, bytes]:
+    request = urllib.request.Request(
+        url,
+        headers={"X-DocFlow-Api-Key": api_key},
+    )
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -50,6 +55,7 @@ def get_bytes(url: str) -> tuple[int, bytes]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--api-key", required=True)
     parser.add_argument("--review-document-id", required=True)
     parser.add_argument("--processed-document-id", required=True)
     args = parser.parse_args()
@@ -60,7 +66,7 @@ def main() -> None:
     )
     review_url = f"{base}/api/documents/{args.review_document_id}/review"
 
-    status, before = request_json("GET", review_result_url)
+    status, before = request_json("GET", review_result_url, args.api_key)
     assert status == 200 and isinstance(before, dict), (status, before)
     extraction_result_id = before["id"]
     assert before["validationStatus"] == "Invalid", before
@@ -75,6 +81,7 @@ def main() -> None:
     status, _ = request_json(
         "PUT",
         review_url,
+        args.api_key,
         {
             "expectedExtractionResultId": stale_id,
             "data": corrected_data,
@@ -86,6 +93,7 @@ def main() -> None:
     status, malformed = request_json(
         "PUT",
         review_url,
+        args.api_key,
         {
             "expectedExtractionResultId": extraction_result_id,
             "data": ["not", "an", "object"],
@@ -96,6 +104,7 @@ def main() -> None:
     status, reviewed = request_json(
         "PUT",
         review_url,
+        args.api_key,
         {
             "expectedExtractionResultId": extraction_result_id,
             "data": corrected_data,
@@ -111,12 +120,14 @@ def main() -> None:
     assert reviewed["reviewedAt"], reviewed
 
     status, document = request_json(
-        "GET", f"{base}/api/documents/{args.review_document_id}"
+        "GET",
+        f"{base}/api/documents/{args.review_document_id}",
+        args.api_key,
     )
     assert status == 200 and isinstance(document, dict), (status, document)
     assert document["status"] == "Processed", document
 
-    status, after = request_json("GET", review_result_url)
+    status, after = request_json("GET", review_result_url, args.api_key)
     assert status == 200 and isinstance(after, dict), (status, after)
     assert after["id"] == extraction_result_id, after
     assert after["validationStatus"] == "Invalid", after
@@ -127,7 +138,8 @@ def main() -> None:
     assert after["structuredData"]["human_review"]["review_id"] == review_id, after
 
     status, csv_bytes = get_bytes(
-        f"{base}/api/documents/{args.review_document_id}/export?format=csv"
+        f"{base}/api/documents/{args.review_document_id}/export?format=csv",
+        args.api_key,
     )
     assert status == 200, status
     rows = {
@@ -140,6 +152,7 @@ def main() -> None:
     status, _ = request_json(
         "PUT",
         review_url,
+        args.api_key,
         {
             "expectedExtractionResultId": extraction_result_id,
             "data": corrected_data,
@@ -151,11 +164,13 @@ def main() -> None:
     status, processed_result = request_json(
         "GET",
         f"{base}/api/documents/{args.processed_document_id}/extraction-result",
+        args.api_key,
     )
     assert status == 200 and isinstance(processed_result, dict), (status, processed_result)
     status, _ = request_json(
         "PUT",
         f"{base}/api/documents/{args.processed_document_id}/review",
+        args.api_key,
         {
             "expectedExtractionResultId": processed_result["id"],
             "data": processed_result["structuredData"]["data"],
@@ -167,6 +182,7 @@ def main() -> None:
     status, _ = request_json(
         "PUT",
         f"{base}/api/documents/{missing_document_id}/review",
+        args.api_key,
         {
             "expectedExtractionResultId": extraction_result_id,
             "data": corrected_data,

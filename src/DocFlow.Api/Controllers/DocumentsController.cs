@@ -1,15 +1,18 @@
 using System.Text.Json;
+using DocFlow.Api.Authentication;
 using DocFlow.Application.Abstractions;
 using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocFlow.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/documents")]
 public sealed class DocumentsController : ControllerBase
 {
@@ -37,12 +40,12 @@ public sealed class DocumentsController : ControllerBase
     [HttpGet]
     [ProducesResponseType(typeof(ListDocumentsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ListDocumentsResponse>> List(
         [FromQuery] ListDocumentsRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.CustomerId == Guid.Empty)
-            return BadRequest("Customer id is required.");
+        var customerId = User.GetRequiredCustomerId();
 
         if (request.Page < 1)
             return BadRequest("Page must be greater than or equal to 1.");
@@ -83,7 +86,7 @@ public sealed class DocumentsController : ControllerBase
 
         var documents = _dbContext.Documents
             .AsNoTracking()
-            .Where(x => x.CustomerId == request.CustomerId);
+            .Where(x => x.CustomerId == customerId);
 
         if (statusFilter is not null)
             documents = documents.Where(x => x.Status == statusFilter.Value);
@@ -146,14 +149,17 @@ public sealed class DocumentsController : ControllerBase
 
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(GetDocumentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<GetDocumentResponse>> GetById(
         Guid id,
         CancellationToken cancellationToken)
     {
+        var customerId = User.GetRequiredCustomerId();
+
         var document = await _dbContext.Documents
             .AsNoTracking()
-            .Where(x => x.Id == id)
+            .Where(x => x.Id == id && x.CustomerId == customerId)
             .Select(x => new GetDocumentResponse(
                 x.Id,
                 x.CustomerId,
@@ -176,17 +182,22 @@ public sealed class DocumentsController : ControllerBase
 
     [HttpGet("{id:guid}/extraction-result")]
     [ProducesResponseType(typeof(GetExtractionResultResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<GetExtractionResultResponse>> GetExtractionResult(
         Guid id,
         CancellationToken cancellationToken)
     {
+        var customerId = User.GetRequiredCustomerId();
+
         var result = await (
                 from extractionResult in _dbContext.ExtractionResults.AsNoTracking()
+                join document in _dbContext.Documents.AsNoTracking()
+                    on extractionResult.DocumentId equals document.Id
                 join review in _dbContext.DocumentReviews.AsNoTracking()
                     on extractionResult.DocumentId equals review.DocumentId into reviews
                 from review in reviews.DefaultIfEmpty()
-                where extractionResult.DocumentId == id
+                where extractionResult.DocumentId == id && document.CustomerId == customerId
                 select new
                 {
                     extractionResult.Id,
@@ -223,6 +234,7 @@ public sealed class DocumentsController : ControllerBase
     [Consumes("application/json")]
     [ProducesResponseType(typeof(SaveExtractionResultResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<SaveExtractionResultResponse>> SaveExtractionResult(
@@ -230,6 +242,10 @@ public sealed class DocumentsController : ControllerBase
         [FromBody] JsonElement request,
         CancellationToken cancellationToken)
     {
+        var customerId = User.GetRequiredCustomerId();
+        if (!await IsOwnedDocumentAsync(id, customerId, cancellationToken))
+            return NotFound();
+
         if (request.ValueKind != JsonValueKind.Object)
             return BadRequest("The extraction result must be a JSON object.");
 
@@ -293,16 +309,14 @@ public sealed class DocumentsController : ControllerBase
 
     [HttpPost("{id:guid}/process")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Process(
         Guid id,
         CancellationToken cancellationToken)
     {
-        var exists = await _dbContext.Documents
-            .AsNoTracking()
-            .AnyAsync(x => x.Id == id, cancellationToken);
-
-        if (!exists)
+        var customerId = User.GetRequiredCustomerId();
+        if (!await IsOwnedDocumentAsync(id, customerId, cancellationToken))
             return NotFound();
 
         await _documentProcessingQueue.EnqueueAsync(id, cancellationToken);
@@ -313,13 +327,12 @@ public sealed class DocumentsController : ControllerBase
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(UploadDocumentResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<UploadDocumentResponse>> Upload(
         [FromForm] UploadDocumentRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.CustomerId == Guid.Empty)
-            return BadRequest("Customer id is required.");
-
+        var customerId = User.GetRequiredCustomerId();
         var file = request.File;
 
         if (file is null || file.Length == 0)
@@ -348,7 +361,7 @@ public sealed class DocumentsController : ControllerBase
         }
 
         var document = new Document(
-            request.CustomerId,
+            customerId,
             file.FileName,
             file.ContentType,
             storageKey,
@@ -384,6 +397,18 @@ public sealed class DocumentsController : ControllerBase
             document.CreatedAt);
 
         return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    private Task<bool> IsOwnedDocumentAsync(
+        Guid documentId,
+        Guid customerId,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.Documents
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Id == documentId && x.CustomerId == customerId,
+                cancellationToken);
     }
 
     private static bool TryGetRequiredString(
@@ -447,7 +472,6 @@ public sealed class DocumentsController : ControllerBase
 
     public sealed class ListDocumentsRequest
     {
-        public Guid CustomerId { get; init; }
         public string? Status { get; init; }
         public string? DocumentType { get; init; }
         public int Page { get; init; } = 1;
@@ -476,7 +500,6 @@ public sealed class DocumentsController : ControllerBase
 
     public sealed class UploadDocumentRequest
     {
-        public Guid CustomerId { get; init; }
         public IFormFile? File { get; init; }
     }
 

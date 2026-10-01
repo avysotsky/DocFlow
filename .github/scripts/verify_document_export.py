@@ -26,8 +26,11 @@ EXPECTED = {
 }
 
 
-def fetch(url: str) -> tuple[int, dict[str, str], bytes]:
-    request = urllib.request.Request(url)
+def fetch(url: str, api_key: str) -> tuple[int, dict[str, str], bytes]:
+    request = urllib.request.Request(
+        url,
+        headers={"X-DocFlow-Api-Key": api_key},
+    )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, dict(response.headers.items()), response.read()
@@ -106,6 +109,7 @@ def assert_expected(rows: dict[str, str]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--api-key", required=True)
     parser.add_argument("--document-id", required=True)
     parser.add_argument("--document-without-result-id", required=True)
     args = parser.parse_args()
@@ -113,13 +117,17 @@ def main() -> None:
     base_url = args.base_url.rstrip("/")
     export_base = f"{base_url}/api/documents/{args.document_id}/export"
 
-    csv_status, csv_headers, csv_payload = fetch(f"{export_base}?format=csv")
+    csv_status, csv_headers, csv_payload = fetch(
+        f"{export_base}?format=csv", args.api_key
+    )
     assert csv_status == 200, csv_status
     assert_headers(csv_headers, "text/csv", ".csv")
     csv_rows = parse_csv(csv_payload)
     assert_expected(csv_rows)
 
-    xlsx_status, xlsx_headers, xlsx_payload = fetch(f"{export_base}?format=xlsx")
+    xlsx_status, xlsx_headers, xlsx_payload = fetch(
+        f"{export_base}?format=xlsx", args.api_key
+    )
     assert xlsx_status == 200, xlsx_status
     assert_headers(
         xlsx_headers,
@@ -131,11 +139,12 @@ def main() -> None:
 
     assert csv_rows == xlsx_rows, "CSV and XLSX do not expose the same flattened data"
 
-    bad_status, _, _ = fetch(f"{export_base}?format=pdf")
+    bad_status, _, _ = fetch(f"{export_base}?format=pdf", args.api_key)
     assert bad_status == 400, bad_status
 
     missing_status, _, _ = fetch(
-        f"{base_url}/api/documents/{args.document_without_result_id}/export?format=csv"
+        f"{base_url}/api/documents/{args.document_without_result_id}/export?format=csv",
+        args.api_key,
     )
     assert missing_status == 404, missing_status
 
