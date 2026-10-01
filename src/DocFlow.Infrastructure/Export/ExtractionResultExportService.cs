@@ -1,5 +1,6 @@
 using DocFlow.Application.Abstractions;
 using DocFlow.Infrastructure.Persistence;
+using DocFlow.Infrastructure.Processing;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocFlow.Infrastructure.Export;
@@ -22,18 +23,25 @@ public sealed class ExtractionResultExportService : IExtractionResultExportServi
                 from extractionResult in _dbContext.ExtractionResults.AsNoTracking()
                 join document in _dbContext.Documents.AsNoTracking()
                     on extractionResult.DocumentId equals document.Id
+                join review in _dbContext.DocumentReviews.AsNoTracking()
+                    on extractionResult.DocumentId equals review.DocumentId into reviews
+                from review in reviews.DefaultIfEmpty()
                 where extractionResult.DocumentId == documentId
                 select new
                 {
                     extractionResult.StructuredDataJson,
-                    document.OriginalFileName
+                    document.OriginalFileName,
+                    Review = review
                 })
             .SingleOrDefaultAsync(cancellationToken);
 
         if (source is null)
             return null;
 
-        var rows = StructuredDataTabularExporter.Flatten(source.StructuredDataJson);
+        var effectiveStructuredDataJson = ReviewedStructuredDataComposer.Compose(
+            source.StructuredDataJson,
+            source.Review);
+        var rows = StructuredDataTabularExporter.Flatten(effectiveStructuredDataJson);
         var safeBaseName = BuildSafeBaseName(source.OriginalFileName, documentId);
 
         return format switch
