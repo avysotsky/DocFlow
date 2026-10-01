@@ -66,6 +66,10 @@ builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExpor
 builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
+
+// Hosted services start in registration order. Recovery enqueues persisted orphaned work
+// before the normal single-reader queue consumer begins processing.
+builder.Services.AddHostedService<DocumentProcessingRecoveryHostedService>();
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";

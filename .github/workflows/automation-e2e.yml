@@ -1,5 +1,5 @@
 name: Automation E2E
-# Final validation: 1.1.1.11 ApiKeyAuth
+# Final validation: 1.1.1.14 RestartRecovery
 
 on:
   push:
@@ -16,6 +16,7 @@ on:
       - '.github/scripts/verify_document_export.py'
       - '.github/scripts/verify_document_inbox.py'
       - '.github/scripts/verify_document_review.py'
+      - '.github/scripts/verify_restart_recovery.sh'
       - '.github/workflows/automation-e2e.yml'
   workflow_dispatch:
 
@@ -360,4 +361,18 @@ jobs:
             --review-document-id "$invalid_document_id" \
             --processed-document-id "$invoice_document_id"
 
-          echo "Automation E2E passed: API-key auth, tenant isolation, quotations, idempotency, review/failure routing, borderless layout, supplier invoice, CSV/XLSX export, document inbox and human review verified."
+          echo "Automation E2E core scenarios passed."
+
+      - name: Verify restart recovery
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://127.0.0.1:5080
+          ConnectionStrings__DocFlowDbContext: Host=127.0.0.1;Port=5432;Database=docflow;Username=postgres;Password=postgres
+          Authentication__ApiKey__Clients__0__Name: e2e-primary
+          Authentication__ApiKey__Clients__0__CustomerId: 11111111-1111-1111-1111-111111111111
+          Authentication__ApiKey__Clients__0__ApiKey: docflow-e2e-primary-key
+          FileStorage__RootPath: /tmp/docflow-recovery-storage
+          DOCFLOW_BASE_URL: http://127.0.0.1:5080
+          DOCFLOW_API_KEY: docflow-e2e-primary-key
+          DOCFLOW_CUSTOMER_ID: 11111111-1111-1111-1111-111111111111
+        run: bash .github/scripts/verify_restart_recovery.sh
