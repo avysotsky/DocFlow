@@ -64,7 +64,8 @@ def extract_preferred_invoice_total(
 
     This deliberately excludes non-monetary ``Total ...`` rows such as total quantity,
     total gross weight and ``Total amount in words``. It also ranks a gross/grand total
-    above a remaining balance such as ``Amount due``.
+    above a remaining balance or settlement summary such as ``Amount due`` or
+    ``Total Net Payments``.
     """
     best_priority = -1
     best_value: Decimal | None = None
@@ -85,6 +86,10 @@ def extract_preferred_invoice_total(
                 "totalnetweight",
                 "totalgrossweight",
                 "totalamountinwords",
+                # Settlement/payment summaries are not the gross invoice total.
+                "totalnetpayment",
+                "totalpayments",
+                "totalpaid",
             )
         ):
             continue
