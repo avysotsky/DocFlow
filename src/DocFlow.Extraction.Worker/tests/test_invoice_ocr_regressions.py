@@ -87,20 +87,23 @@ AMOUNT DUE GBP 0.00
 
 
 def test_degraded_ocr_recovers_textual_date_and_corrupted_vat_summary() -> None:
+    sparse_invoice_date = "Invoice Date:" + (" " * 90) + ". 18-Dec-13"
     content = _content(
-        """
-TAX INVOICE
-Invoice No: WIR00286
-Invoice Date: 18-Dec-13
-Waste and Recycling £548,377.77
-Street Cleansing £293,471.08
-Bank Holiday £22,934.26
-Sweeper refund £4,615.38 -
-Sub Total FROeT a].
-Terms: 28 days from invoice date
-VATaoe@ 20% - i eee£172,033.55 ° 20| Cae
-TOTAL £1,032,201.28
-"""
+        "\n".join(
+            [
+                "TAX INVOICE",
+                "Invoice No: WIR00286",
+                sparse_invoice_date,
+                "Waste and Recycling £548,377.77",
+                "Street Cleansing £293,471.08",
+                "Bank Holiday £22,934.26",
+                "Sweeper refund £4,615.38 -",
+                "Sub Total FROeT a].",
+                "Terms: 28 days from invoice date",
+                "VATaoe@ 20% - i eee£172,033.55 ° 20| Cae",
+                "TOTAL £1,032,201.28",
+            ]
+        )
     )
 
     result = asyncio.run(
