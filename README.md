@@ -21,6 +21,7 @@ Authenticated customer API
   -> original PDF retrieval
   -> CSV/XLSX export
   -> explicit terminal document deletion
+  -> optional automatic retention cleanup
 ```
 
 Measured public-reference baseline:
@@ -141,7 +142,35 @@ Cross-tenant ids return `404`. After successful deletion all normal document, fi
 
 Local filesystem and PostgreSQL do not form a distributed transaction. A storage failure rolls the database transaction back; a rare database commit failure after successful file deletion remains a residual cross-resource consistency risk.
 
-`Document.DeleteAt` still exists as retention metadata but automatic scheduled retention is not implemented yet.
+## Retention policy
+
+Automatic retention is opt-in and disabled by default, so upgrading an existing deployment does not start deleting historical documents.
+
+Default configuration:
+
+```json
+{
+  "Retention": {
+    "Enabled": false,
+    "DefaultRetentionDays": 30,
+    "SweepIntervalSeconds": 3600,
+    "BatchSize": 100
+  }
+}
+```
+
+When retention is enabled, new uploads receive a future `DeleteAt` timestamp. A single-instance background sweep periodically selects only expired terminal documents:
+
+```text
+DeleteAt <= now
+and Status in (Processed, NeedsReview, Failed)
+```
+
+Expired `Uploaded` and `Processing` documents are deliberately not selected. They remain available for processing and can be reconsidered by a later sweep after reaching a terminal state.
+
+Each retention deletion reuses the same `IDocumentDeletionService` as the explicit customer delete API, including row locking, stored-file cleanup and existing database cascades. Sweeps are batch-limited, per-document failures are logged without aborting the remaining candidates, and options are validated on application startup.
+
+This scheduler follows the same **single-instance MVP** boundary as processing recovery. It is not a distributed retention lease/scheduler.
 
 ## Production deployment
 
@@ -213,7 +242,7 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints, source-file streaming, lifecycle/delete, processing diagnostics, startup recovery, health probes and background-service host.
+- **DocFlow.Api** — authenticated HTTP endpoints, source-file streaming, lifecycle/delete, retention scheduling, processing diagnostics, startup recovery, health probes and background-service host.
 - **DocFlow.Application** — processing/export/review/deletion abstractions and orchestration contracts.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review/deletion and export implementation.
@@ -241,8 +270,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, and tenant-scoped original PDF streaming with range support.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, and opt-in automatic retention for expired terminal documents.
 
-The next narrow lifecycle candidate is an explicit retention policy around the existing `DeleteAt` metadata. Before implementing it, inspect how `DeleteAt` is currently initialized and define deterministic rules for terminal versus active documents; do not silently auto-delete active work.
+A strong next product gap is review audit identity. `DocumentReview` records when and what was corrected, but they still do not identify an authenticated human reviewer. The current API-key client identity is a tenant/integration identity and must not be mislabeled as a human reviewer; the authentication/audit boundary should be inspected before implementing this.
 
 Production code remains private. A separate public portfolio repository may be created later.
