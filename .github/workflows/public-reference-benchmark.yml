@@ -1,5 +1,5 @@
 name: Public Reference Benchmark
-# Validation batch: first real degraded-scan measurement
+# Validation batch: degraded-scan measurement after manifest metadata fix
 
 on:
   push:
