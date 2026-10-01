@@ -1,6 +1,6 @@
 # DocFlow — active handoff for 1.1.1.7 DegradedOCR
 
-Status: **ACTIVE**  
+Status: **READY FOR MILESTONE CLOSURE**  
 Working branch: `DocFlow/v_1.1.1.7_DegradedOCR`  
 Started from completed milestone: `DocFlow/v_1.1.1.6_HardCases`
 
@@ -17,84 +17,164 @@ Automation E2E #95: SUCCESS
 Scanned OCR E2E #72: SUCCESS
 ```
 
-Do not weaken or reinterpret this baseline while working on degraded OCR.
-
 ## 2. Purpose
 
-Add measured evidence for real-world OCR degradation that is not represented strongly enough by the current corpus.
+Add measured evidence for real-world OCR degradation that was not represented strongly enough by the previous corpus, then implement only generic recovery justified by the measured failure.
 
-Target degradation classes:
+## 3. Admitted real degraded source
 
-```text
-skew / rotation
-low contrast / faded print
-scan noise / compression artifacts
-blur
-broken punctuation around money values
-mobile-camera-like perspective or illumination
-```
-
-The preferred source is an independently verifiable real/public supplier invoice. A clean scan is not enough merely because it is image-only.
-
-## 3. Engineering loop
+Public degraded reproduction:
 
 ```text
-find legitimate public source
--> visually verify degradation
--> independently transcribe ground truth
--> record source URL/hash/metadata
--> run current pipeline without production changes
--> inspect native text / OCR text / structured result
--> classify the measured failure
--> implement the smallest generic preprocessing/OCR/layout change
--> regression tests
--> one consolidated public benchmark
+id: biffa-wirral-invoice-wir00286
+supplier: Biffa Waste Services Ltd
+customer: Wirral Council
+source kind: scanned image / public reproduction
+image size: 578 x 825
+source image sha256: 1b2ded90e34473463f03655a920ad16fb3501e84983ae74646a078c10a215f23
+layout class: degraded grayscale photocopy scan
+preprocessing before DocFlow: none
 ```
 
-Do not create a production preprocessing stage before a measured source shows why it is required.
+The source is publicly traceable but is **not** hosted by Wirral Council. The benchmark metadata explicitly records that provenance distinction.
 
-## 4. Candidate preprocessing techniques
+The original JPEG bytes are preserved by the acquisition script and wrapped losslessly in a one-page image-only PDF only because the current DocFlow ingestion contract is PDF-based.
 
-These are investigation candidates, not pre-approved production changes:
+Ground truth was transcribed before DocFlow processing:
 
-- orientation detection / 90-degree rotation correction;
-- deskew for small-angle rotation;
-- grayscale normalization;
-- contrast stretching;
-- adaptive thresholding;
-- denoise / morphology for compression speckle;
-- render-DPI tuning;
-- selective image-region OCR;
-- conservative OCR re-run only when first-pass text quality is poor.
+```text
+invoice_number: WIR00286
+invoice_date: 2013-12-18
+currency: GBP
+subtotal: 860167.73
+vat_rate: 20
+vat_amount: 172033.55
+total: 1032201.28
+```
 
-Every candidate must be evaluated for regression risk and runtime cost.
+Expected DocFlow validation status is `incomplete`, not `valid`, because the degraded scan does not provide reliable quantity/unit-price columns for independent line-total/subtotal verification. Correct field extraction is therefore separated from arithmetic-verification completeness.
 
-## 5. Acceptance criteria
+## 4. Measured baseline before production fix
 
-A degraded-OCR case is useful only when:
+Public Reference Benchmark #76 measured the existing pipeline against the admitted degraded scan.
 
-1. the original public document is legitimate and traceable;
-2. degradation is visible in the source, not synthetically claimed as real-world evidence;
-3. business ground truth is transcribed independently of DocFlow output;
-4. the current pipeline's failure or weakness is measured before code changes;
-5. any production fix is generic to the degradation class;
-6. clean digital/OCR regression cases stay green;
-7. Public Reference Benchmark remains green after admission/fix.
+```text
+documents_total: 17
+documents_passed: 16
+documents_failed: 1
+document_type_correct: 17/17
+fields_checked: 98
+fields_matched: 94
+```
 
-If no suitable real/public source can be found, document that result explicitly. A synthetic degradation fixture may be used for engineering experiments, but it must be labelled synthetic and must not be counted as real-corpus evidence.
+The document type, invoice number, currency and total were already recovered correctly. The measured missing fields were:
 
-## 6. CI discipline
+```text
+invoice_date
+subtotal
+vat_rate
+vat_amount
+```
 
-Do not trigger GitHub Actions during source search or each experiment.
+The OCR output itself contained usable evidence:
 
-Use `[skip ci]` for intermediate implementation/test commits and run one consolidated validation after a coherent block.
+```text
+Invoice Date: ... 18-Dec-13
+VATaoe@ 20% ... £172,033.55
+TOTAL £1,032,201.28
+```
 
-## 7. Model fallback rule
+The subtotal label/value area was more severely damaged.
 
-ONNX/LLM remains deferred.
+## 5. Production recovery implemented
 
-Visual degradation should first be addressed, if justified, with image/OCR preprocessing. Only a measured semantic extraction failure that remains after adequate OCR/layout recovery can justify evaluating a model fallback.
+Added `docflow_worker/degraded_invoice_fallbacks.py` and inserted it into the normal supplier-invoice structured pipeline.
 
-## 8. Immediate next action
+The recovery is deliberately generic and conservative:
 
-Find and visually inspect candidate public invoice PDFs, prioritizing council/public-body payment packs because they often contain scans of original paper invoices and provide independent payment schedules useful for ground-truth cross-checking.
+1. textual dates are recovered only after an explicit `Invoice Date` label;
+2. abbreviated English month dates such as `18-Dec-13` are supported;
+3. same-line OCR layout noise between the date label and date is tolerated without crossing a newline;
+4. VAT recovery requires an explicit VAT-like label plus percentage;
+5. VAT amount prefers an explicit currency-symbol amount;
+6. if the subtotal is unreadable, it is derived only when both gross total and VAT amount are confidently known;
+7. the fallback does not invent line items and does not promote validation status.
+
+This keeps the existing validation semantics intact: extraction can recover the business values while the validator still reports `incomplete` when item-level arithmetic cannot be independently verified.
+
+## 6. Regression coverage
+
+Added a degraded-OCR regression fixture mirroring the measured failure class:
+
+```text
+Invoice No: WIR00286
+Invoice Date: <large same-line OCR gap> . 18-Dec-13
+corrupted subtotal label
+VATaoe@ 20% ... £172,033.55
+TOTAL £1,032,201.28
+```
+
+The regression asserts all recovered fields and the expected `incomplete` validation status.
+
+## 7. Final public benchmark
+
+Public Reference Benchmark #78 on head `a67dcd9c0f90d0ad93ec9b5dacd528a9403daede` is fully green:
+
+```text
+Python regression tests: 69 passed
+
+documents_total: 17
+documents_passed: 17
+documents_failed: 0
+document_pass_rate: 1.0
+
+document_type_correct: 17/17
+document_type_accuracy: 1.0
+
+validation_status_checked: 17
+validation_status_correct: 17
+validation_status_accuracy: 1.0
+
+fields_checked: 98
+fields_matched: 98
+field_accuracy: 1.0
+failure_reason_counts: {}
+```
+
+Artifact:
+
+```text
+artifact id: 11151732373
+sha256: 81435e818fabf8b0ef856c3666bcd94820fa82b27ca36d4f5fe96d81c0b27582
+```
+
+## 8. Acceptance criteria status
+
+All DegradedOCR acceptance criteria are met:
+
+- real/public degraded source is traceable;
+- degradation is visible and not synthetic;
+- ground truth was transcribed independently of DocFlow output;
+- weakness was measured before production changes;
+- recovery rules are generic to the observed OCR/layout degradation;
+- clean digital/OCR regression cases remain green;
+- Public Reference Benchmark is green after admission and fix.
+
+## 9. Model fallback decision
+
+ONNX/LLM remains **not justified** by this milestone.
+
+The measured failure was recoverable deterministically from OCR/layout evidence. No semantic failure remains that would justify adding model inference cost or nondeterminism.
+
+## 10. CI discipline and closure
+
+Intermediate implementation/test commits used `[skip ci]`. Public Reference was run only for measured checkpoints and final validation.
+
+Before marking this milestone completed, run milestone-level validation once:
+
+```text
+Automation E2E
+Scanned OCR E2E
+```
+
+Do not rerun Public Reference merely for closure; #78 is already the consolidated green reference baseline.
