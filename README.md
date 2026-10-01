@@ -8,7 +8,8 @@ The system converts digital or scanned PDF documents into validated structured d
 
 ```text
 Authenticated customer API
-  -> PDF upload
+  -> single PDF upload or bounded multi-PDF batch intake
+  -> shared validation/storage/persistence intake service
   -> startup recovery of orphaned Uploaded/Processing work
   -> bounded background processing attempts
   -> automatic digital/scanned handling
@@ -71,6 +72,38 @@ Configuration shape:
 ```
 
 Do not commit production API keys. Supply them with environment variables, user-secrets, or a production secret store. Outside Development the application fails startup unless at least one valid API-key client is configured.
+
+## Batch intake
+
+Single-document and batch uploads now share the same scoped intake service, so PDF validation, storage, persistence rollback, retention timestamp assignment and processing enqueue are not duplicated across endpoints.
+
+Single upload:
+
+```text
+POST /api/documents
+```
+
+Bounded batch upload:
+
+```text
+POST /api/documents/batch
+multipart field: Files
+```
+
+Batch limits:
+
+```text
+maximum files: 10
+maximum individual file: 20 MB
+maximum aggregate file bytes: 50 MB
+endpoint transport request ceiling: 60 MB
+```
+
+The 60 MB transport limit exists only to allow multipart headers/boundaries around the 50 MB aggregate business limit; the global API request limit is not expanded.
+
+Batch-level zero-file, file-count and aggregate-size violations return `400` before any file is persisted. Inside an accepted batch, files are handled sequentially and independently, preserving input order. Per-file outcomes are `Accepted`, `Rejected`, or `Failed`; valid files can be persisted/enqueued even when another file in the same batch fails validation.
+
+A database failure rolls back that file's storage object when possible and detaches the failed Added entity from the scoped EF Core context before processing the next batch item.
 
 ## Review audit attribution
 
@@ -271,6 +304,7 @@ Current customer document flow includes:
 
 ```text
 POST   /api/documents
+POST   /api/documents/batch
 GET    /api/documents?status=...&documentType=...&page=1&pageSize=50
 POST   /api/documents/{id}/process
 GET    /api/documents/{id}
@@ -305,7 +339,7 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints, operator metrics surface, source-file streaming, lifecycle/delete, retention scheduling, processing diagnostics, startup recovery, health probes and background-service host.
+- **DocFlow.Api** — authenticated single/batch intake, operator metrics surface, source-file streaming, lifecycle/delete, retention scheduling, processing diagnostics, startup recovery, health probes and background-service host.
 - **DocFlow.Application** — processing/export/review/deletion abstractions plus process-local operational metric state.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review/deletion and export implementation.
@@ -333,8 +367,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, and protected low-cardinality process-local operational metrics.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, protected low-cardinality process-local operational metrics, and bounded partial-success multi-PDF batch intake through the same single-document intake service.
 
-A strong next product candidate is bounded batch intake. Before implementing it, extract or reuse the current single-document validation/storage/persistence/enqueue path and define explicit per-file partial-failure semantics; do not mix ZIP/email/cloud-ingestion features into the same milestone.
+A strong next reliability gap is HTTP intake idempotency. A client retry after a network timeout can currently create duplicate durable documents, and batch retry can multiply the problem. Inspect tenant-scoped persisted idempotency-key semantics before adding broader ingestion channels or distributed infrastructure.
 
 Production code remains private. A separate public portfolio repository may be created later.
