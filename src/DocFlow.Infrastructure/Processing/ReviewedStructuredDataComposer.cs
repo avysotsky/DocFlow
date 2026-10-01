@@ -30,7 +30,7 @@ public static class ReviewedStructuredDataComposer
         root["human_review"] = new JsonObject
         {
             ["review_id"] = review.Id.ToString(),
-            ["reviewed_at"] = review.ReviewedAt,
+            ["reviewed_at"] = review.ReviewedAt.ToString("O"),
             ["note"] = review.Note
         };
 
