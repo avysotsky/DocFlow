@@ -1,7 +1,7 @@
-# DocFlow — active handoff for 1.1.1.9 DocumentInbox
+# DocFlow — completed handoff for 1.1.1.9 DocumentInbox
 
-Status: **ACTIVE**  
-Working branch: `DocFlow/v_1.1.1.9_DocumentInbox`  
+Status: **COMPLETED**  
+Completed branch: `DocFlow/v_1.1.1.9_DocumentInbox`  
 Started from completed milestone: `DocFlow/v_1.1.1.8_Export`
 
 ## 1. Starting baseline
@@ -17,23 +17,11 @@ Automation E2E #97: SUCCESS
 CSV/XLSX persisted-result export: verified
 ```
 
-Extraction/OCR/export serialization are out of scope unless the inbox implementation exposes a concrete contract defect.
+Extraction/OCR/export serialization remained out of scope and unchanged.
 
-## 2. Product gap
+## 2. Product capability added
 
-The API currently exposes document operations only by a known document GUID:
-
-```text
-GET /api/documents/{id}
-GET /api/documents/{id}/extraction-result
-GET /api/documents/{id}/export?format=...
-```
-
-There is no collection endpoint. A UI or external integration therefore cannot recover a customer's document history, processing state, review state, or export availability after losing its in-memory upload response.
-
-This is a direct product-usability blocker for the initial MVP.
-
-## 3. Target API
+DocFlow now exposes a customer-scoped document inbox endpoint:
 
 ```text
 GET /api/documents?customerId={guid}&page=1&pageSize=50
@@ -46,11 +34,11 @@ status=Uploaded|Processing|Processed|NeedsReview|Failed
 documentType=supplier_invoice
 ```
 
-`customerId` is mandatory for this milestone. This is not an authentication/authorization mechanism; real tenant authorization remains a separate security milestone.
+`customerId` is mandatory for this milestone. It scopes the query but is not an authentication or authorization mechanism; tenant authorization remains a separate security concern.
 
-## 4. Response contract
+## 3. Response contract
 
-Return a paginated envelope:
+The endpoint returns:
 
 ```text
 page
@@ -60,7 +48,7 @@ totalPages
 items[]
 ```
 
-Each item should contain enough information for an inbox/list UI without additional N+1 API calls:
+Each item includes:
 
 ```text
 id
@@ -76,57 +64,119 @@ validationStatus
 confidence
 ```
 
-Do not expose `StorageKey` in collection responses.
+`StorageKey` is deliberately not exposed by the collection endpoint.
 
-`extractionResultId != null` also tells the client that persisted-result/export operations are available.
+A non-null `extractionResultId` tells clients that persisted extraction/export operations are available without an additional lookup.
 
-## 5. Query semantics
+## 4. Query implementation
 
-- require non-empty `customerId`;
-- page is 1-based;
-- pageSize range: 1..100, default 50;
-- status filter is case-insensitive but must be a defined `DocumentStatus`;
-- documentType is trimmed/lower-cased before exact comparison;
-- ordering is deterministic: `CreatedAt DESC`, then `Id DESC`;
-- totalCount is computed after customer/status/documentType filters and before paging;
-- use `AsNoTracking()` for read-only queries;
-- include extraction summary through one SQL query / left join, not N+1 lookups.
+The collection query:
 
-Existing indexes already support the principal access path:
+- requires non-empty `customerId`;
+- uses 1-based paging;
+- limits `pageSize` to 1..100, default 50;
+- parses status case-insensitively and rejects undefined `DocumentStatus` values;
+- trims/lower-cases `documentType` before exact persisted comparison;
+- orders deterministically by `CreatedAt DESC`, then `Id DESC`;
+- computes `totalCount` after filters and before paging;
+- uses `AsNoTracking()` for read-only access;
+- joins `ExtractionResults` with a left join so extraction summary data is returned without N+1 calls;
+- leaves documents without extraction results visible with null extraction fields.
+
+No database migration was required. Existing indexes continue to support the principal access path:
 
 ```text
 (CustomerId, CreatedAt)
 Status
 ```
 
-No database migration is expected for the initial inbox implementation.
+## 5. Validation behavior
 
-## 6. HTTP validation
-
-Return `400 Bad Request` for:
+The endpoint returns `400 Bad Request` for:
 
 - empty customerId;
 - page < 1;
 - pageSize < 1 or > 100;
 - unknown status;
-- documentType longer than the persisted 100-character schema limit.
+- documentType longer than the persisted 100-character schema limit;
+- page offsets that exceed the supported integer range.
 
-A valid query with no matching documents returns `200` with an empty `items` array and `totalCount = 0`.
+A valid customer query with no matching documents returns `200` with an empty `items` array, `totalCount = 0`, and `totalPages = 0`.
 
-## 7. Acceptance criteria
+## 6. E2E verifier
 
-1. A customer can retrieve their uploaded documents after the original upload response is gone.
-2. Documents from a different customer are not returned by the customerId filter.
-3. Newest-first ordering is deterministic.
-4. Status filter works for processing/review/failure states.
-5. documentType filter works against persisted classification.
-6. Pagination metadata and page slicing are correct.
-7. Each item includes persisted validation/confidence when an extraction result exists.
-8. A document without an extraction result remains visible with null extraction fields.
-9. Invalid query parameters return 400.
-10. Existing upload/process/export scenarios remain green.
-11. Intermediate commits use `[skip ci]`; run one Automation E2E after the coherent inbox block.
+Added `.github/scripts/verify_document_inbox.py` and wired it into the existing Automation E2E flow.
 
-## 8. Immediate implementation plan
+The verifier covers:
 
-Add the collection GET to `DocumentsController`, then extend the existing Automation E2E with a focused verifier that checks customer isolation, filters, paging, extraction summary, and invalid query handling.
+- customer isolation using a second customer fixture;
+- deterministic newest-first ordering;
+- status filtering, including `NeedsReview`;
+- case-normalized document-type filtering;
+- persisted extraction result id / validation / confidence summary;
+- visibility of failed/uploaded documents without extraction results;
+- pagination metadata and disjoint page slicing;
+- empty valid customer result;
+- invalid query handling;
+- absence of `StorageKey` from collection items.
+
+## 7. Final validation
+
+Automation E2E #98 on head `db90a86dbc5f0832d256f243fe7b9774ab6f7351` is fully green.
+
+```text
+.NET build: SUCCESS
+0 warnings
+0 errors
+Database migrations: SUCCESS
+Synthetic fixtures: SUCCESS
+Existing processing scenarios: SUCCESS
+CSV/XLSX export regression: SUCCESS
+Document inbox E2E: SUCCESS
+```
+
+The runtime verifier reported:
+
+```text
+Document inbox E2E passed: customer isolation, deterministic ordering,
+status/document-type filters, extraction summary, pagination and query validation verified.
+```
+
+The full Automation E2E ended with:
+
+```text
+Automation E2E passed: quotations, idempotency, review/failure routing,
+borderless layout, supplier invoice, CSV/XLSX export and document inbox verified.
+```
+
+## 8. Extraction baseline
+
+No extraction/OCR production code changed in this milestone, so Public Reference Benchmark #78 remains the authoritative extraction baseline and was intentionally not rerun:
+
+```text
+69 Python tests
+17/17 public documents
+98/98 checked fields
+17/17 document types
+17/17 validation statuses
+```
+
+Scanned OCR E2E was also not rerun because the inbox change does not affect OCR ingestion or extraction.
+
+## 9. Acceptance criteria status
+
+All DocumentInbox acceptance criteria are met:
+
+1. customer document history can be recovered through the collection API;
+2. customer isolation is enforced by the required customerId query filter;
+3. newest-first ordering is deterministic;
+4. status filtering works for review/failure states;
+5. documentType filtering works against persisted classification;
+6. paging metadata and slicing are correct;
+7. extraction summary fields are included when present;
+8. documents without extraction results remain visible with null summary fields;
+9. invalid query parameters return 400;
+10. existing upload/process/export scenarios remain green;
+11. development used `[skip ci]` intermediate commits and one final Automation E2E run.
+
+Milestone `1.1.1.9 DocumentInbox` is complete.
