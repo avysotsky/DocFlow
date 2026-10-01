@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Verify authenticated tenant-scoped document inbox filtering and pagination."""
+"""Verify authenticated tenant-scoped inbox, diagnostics, and bounded batch intake."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+from pathlib import Path
 
 
 def request_json(
@@ -19,6 +22,53 @@ def request_json(
         headers["X-DocFlow-Api-Key"] = api_key
 
     request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read()
+            return response.status, json.loads(payload) if payload else None
+    except urllib.error.HTTPError as error:
+        payload = error.read()
+        parsed = None
+        if payload:
+            try:
+                parsed = json.loads(payload)
+            except json.JSONDecodeError:
+                parsed = payload.decode("utf-8", errors="replace")
+        return error.code, parsed
+
+
+def request_multipart(
+    url: str,
+    api_key: str,
+    files: list[tuple[str, str, bytes]],
+) -> tuple[int, object | None]:
+    boundary = f"----docflow-e2e-{uuid.uuid4().hex}"
+    body = bytearray()
+
+    for file_name, content_type, payload in files:
+        body.extend(f"--{boundary}\r\n".encode())
+        body.extend(
+            (
+                'Content-Disposition: form-data; name="Files"; '
+                f'filename="{file_name}"\r\n'
+            ).encode()
+        )
+        body.extend(f"Content-Type: {content_type}\r\n\r\n".encode())
+        body.extend(payload)
+        body.extend(b"\r\n")
+
+    body.extend(f"--{boundary}--\r\n".encode())
+
+    request = urllib.request.Request(
+        url,
+        data=bytes(body),
+        headers={
+            "X-DocFlow-Api-Key": api_key,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = response.read()
@@ -56,9 +106,89 @@ def get_processing_diagnostics(
     return request_json(url, api_key)
 
 
+def wait_for_terminal_status(base_url: str, api_key: str, document_id: str) -> str:
+    status = ""
+    for _ in range(30):
+        code, document = request_json(
+            f"{base_url.rstrip('/')}/api/documents/{document_id}",
+            api_key,
+        )
+        assert code == 200 and isinstance(document, dict), (code, document)
+        status = str(document["status"])
+        if status in {"Processed", "NeedsReview", "Failed"}:
+            return status
+        time.sleep(1)
+    return status
+
+
 def assert_in_descending_created_order(items: list[dict[str, object]]) -> None:
     created = [str(item["createdAt"]) for item in items]
     assert created == sorted(created, reverse=True), created
+
+
+def verify_batch_intake(base_url: str, api_key: str, other_api_key: str) -> None:
+    batch_url = f"{base_url.rstrip('/')}/api/documents/batch"
+
+    status, _ = request_multipart(batch_url, api_key, [])
+    assert status == 400, status
+
+    too_many = [
+        (f"batch-{index}.pdf", "application/pdf", b"%PDF-\n")
+        for index in range(11)
+    ]
+    status, _ = request_multipart(batch_url, api_key, too_many)
+    assert status == 400, status
+
+    valid_pdf = Path("/tmp/supplier-quotation.pdf").read_bytes()
+    status, batch = request_multipart(
+        batch_url,
+        api_key,
+        [
+            ("batch-valid.pdf", "application/pdf", valid_pdf),
+            ("batch-invalid.txt", "text/plain", b"not-a-pdf"),
+        ],
+    )
+    assert status == 200 and isinstance(batch, dict), (status, batch)
+    assert batch["totalCount"] == 2, batch
+    assert batch["acceptedCount"] == 1, batch
+    assert batch["rejectedCount"] == 1, batch
+    assert batch["failedCount"] == 0, batch
+
+    items = batch["items"]
+    assert isinstance(items, list) and len(items) == 2, batch
+    accepted = items[0]
+    rejected = items[1]
+
+    assert accepted["index"] == 0, accepted
+    assert accepted["originalFileName"] == "batch-valid.pdf", accepted
+    assert accepted["outcome"] == "Accepted", accepted
+    assert accepted["documentId"], accepted
+    assert accepted["documentStatus"] == "Uploaded", accepted
+    assert accepted["error"] is None, accepted
+
+    assert rejected["index"] == 1, rejected
+    assert rejected["originalFileName"] == "batch-invalid.txt", rejected
+    assert rejected["outcome"] == "Rejected", rejected
+    assert rejected["documentId"] is None, rejected
+    assert rejected["documentStatus"] is None, rejected
+    assert rejected["error"] == "Only PDF files are supported.", rejected
+
+    document_id = accepted["documentId"]
+    final_status = wait_for_terminal_status(base_url, api_key, document_id)
+    assert final_status == "Processed", final_status
+
+    status, document = request_json(
+        f"{base_url.rstrip('/')}/api/documents/{document_id}",
+        api_key,
+    )
+    assert status == 200 and isinstance(document, dict), (status, document)
+    assert document["originalFileName"] == "batch-valid.pdf", document
+
+    cross_tenant_status, _ = request_json(
+        f"{base_url.rstrip('/')}/api/documents/{document_id}",
+        other_api_key,
+    )
+    assert cross_tenant_status == 404, cross_tenant_status
 
 
 def main() -> None:
@@ -241,10 +371,12 @@ def main() -> None:
         invalid_status, _ = get_inbox(args.base_url, args.api_key, params)
         assert invalid_status == 400, (params, invalid_status)
 
+    verify_batch_intake(args.base_url, args.api_key, args.other_api_key)
+
     print(
-        "Document inbox/auth E2E passed: 401 authentication, claim-derived tenant scope, "
-        "cross-tenant 404 isolation, bounded processing retries/diagnostics, filters, "
-        "extraction summary and pagination verified."
+        "Document inbox/auth/batch E2E passed: 401 authentication, claim-derived tenant scope, "
+        "cross-tenant 404 isolation, bounded processing retries/diagnostics, filters, pagination, "
+        "and independent bounded batch intake verified."
     )
 
 
