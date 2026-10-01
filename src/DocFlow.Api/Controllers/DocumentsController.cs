@@ -13,6 +13,8 @@ namespace DocFlow.Api.Controllers;
 public sealed class DocumentsController : ControllerBase
 {
     private const long MaxFileSize = 20 * 1024 * 1024;
+    private const int MaxPageSize = 100;
+    private const int MaxDocumentTypeLength = 100;
 
     private readonly DocFlowDbContext _dbContext;
     private readonly IFileStorage _fileStorage;
@@ -29,6 +31,116 @@ public sealed class DocumentsController : ControllerBase
         _fileStorage = fileStorage;
         _extractionResultService = extractionResultService;
         _documentProcessingQueue = documentProcessingQueue;
+    }
+
+    [HttpGet]
+    [ProducesResponseType(typeof(ListDocumentsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ListDocumentsResponse>> List(
+        [FromQuery] ListDocumentsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.CustomerId == Guid.Empty)
+            return BadRequest("Customer id is required.");
+
+        if (request.Page < 1)
+            return BadRequest("Page must be greater than or equal to 1.");
+
+        if (request.PageSize is < 1 or > MaxPageSize)
+            return BadRequest($"Page size must be between 1 and {MaxPageSize}.");
+
+        DocumentStatus? statusFilter = null;
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            if (!Enum.TryParse<DocumentStatus>(
+                    request.Status.Trim(),
+                    ignoreCase: true,
+                    out var parsedStatus)
+                || !Enum.IsDefined(parsedStatus))
+            {
+                return BadRequest(
+                    "Status must be Uploaded, Processing, Processed, NeedsReview, or Failed.");
+            }
+
+            statusFilter = parsedStatus;
+        }
+
+        string? documentTypeFilter = null;
+        if (!string.IsNullOrWhiteSpace(request.DocumentType))
+        {
+            documentTypeFilter = request.DocumentType.Trim().ToLowerInvariant();
+            if (documentTypeFilter.Length > MaxDocumentTypeLength)
+            {
+                return BadRequest(
+                    $"Document type must not exceed {MaxDocumentTypeLength} characters.");
+            }
+        }
+
+        var skipLong = (long)(request.Page - 1) * request.PageSize;
+        if (skipLong > int.MaxValue)
+            return BadRequest("Page is too large.");
+
+        var documents = _dbContext.Documents
+            .AsNoTracking()
+            .Where(x => x.CustomerId == request.CustomerId);
+
+        if (statusFilter is not null)
+            documents = documents.Where(x => x.Status == statusFilter.Value);
+
+        if (documentTypeFilter is not null)
+            documents = documents.Where(x => x.DocumentType == documentTypeFilter);
+
+        var totalCount = await documents.CountAsync(cancellationToken);
+
+        var pageRows = await (
+                from document in documents
+                join extractionResult in _dbContext.ExtractionResults.AsNoTracking()
+                    on document.Id equals extractionResult.DocumentId into extractionResults
+                from extractionResult in extractionResults.DefaultIfEmpty()
+                orderby document.CreatedAt descending, document.Id descending
+                select new DocumentInboxProjection(
+                    document.Id,
+                    document.CustomerId,
+                    document.OriginalFileName,
+                    document.Size,
+                    document.DocumentType,
+                    document.Status,
+                    document.CreatedAt,
+                    document.ProcessedAt,
+                    extractionResult == null ? (Guid?)null : extractionResult.Id,
+                    extractionResult == null
+                        ? (ValidationStatus?)null
+                        : extractionResult.ValidationStatus,
+                    extractionResult == null ? null : extractionResult.Confidence))
+            .Skip((int)skipLong)
+            .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+
+        var items = pageRows
+            .Select(x => new DocumentListItemResponse(
+                x.Id,
+                x.CustomerId,
+                x.OriginalFileName,
+                x.Size,
+                x.DocumentType,
+                x.DocumentStatus.ToString(),
+                x.CreatedAt,
+                x.ProcessedAt,
+                x.ExtractionResultId,
+                x.ValidationStatus?.ToString(),
+                x.Confidence))
+            .ToArray();
+
+        var totalPages = totalCount == 0
+            ? 0
+            : (int)Math.Ceiling(totalCount / (double)request.PageSize);
+
+        return Ok(new ListDocumentsResponse(
+            request.Page,
+            request.PageSize,
+            totalCount,
+            totalPages,
+            items));
     }
 
     [HttpGet("{id:guid}")]
@@ -322,6 +434,35 @@ public sealed class DocumentsController : ControllerBase
             && signature[4] == (byte)'-';
     }
 
+    public sealed class ListDocumentsRequest
+    {
+        public Guid CustomerId { get; init; }
+        public string? Status { get; init; }
+        public string? DocumentType { get; init; }
+        public int Page { get; init; } = 1;
+        public int PageSize { get; init; } = 50;
+    }
+
+    public sealed record ListDocumentsResponse(
+        int Page,
+        int PageSize,
+        int TotalCount,
+        int TotalPages,
+        IReadOnlyList<DocumentListItemResponse> Items);
+
+    public sealed record DocumentListItemResponse(
+        Guid Id,
+        Guid CustomerId,
+        string OriginalFileName,
+        long Size,
+        string? DocumentType,
+        string DocumentStatus,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? ProcessedAt,
+        Guid? ExtractionResultId,
+        string? ValidationStatus,
+        decimal? Confidence);
+
     public sealed class UploadDocumentRequest
     {
         public Guid CustomerId { get; init; }
@@ -363,4 +504,17 @@ public sealed class DocumentsController : ControllerBase
         decimal? Confidence,
         string ValidationStatus,
         DateTimeOffset CreatedAt);
+
+    private sealed record DocumentInboxProjection(
+        Guid Id,
+        Guid CustomerId,
+        string OriginalFileName,
+        long Size,
+        string? DocumentType,
+        DocumentStatus DocumentStatus,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? ProcessedAt,
+        Guid? ExtractionResultId,
+        ValidationStatus? ValidationStatus,
+        decimal? Confidence);
 }
