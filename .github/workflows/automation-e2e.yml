@@ -1,5 +1,5 @@
 name: Automation E2E
-# Milestone validation: 1.1.1.7 DegradedOCR closure
+# Milestone validation: 1.1.1.8 Export
 
 on:
   push:
