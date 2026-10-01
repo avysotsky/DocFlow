@@ -1,3 +1,4 @@
+from docflow_worker.degraded_invoice_fallbacks import apply_degraded_invoice_fallbacks
 from docflow_worker.document_type_detector import detect_document_type
 from docflow_worker.engines import DeterministicSupplierQuotationEngine
 from docflow_worker.engines.deterministic_supplier_invoice_multipage import (
@@ -41,6 +42,7 @@ async def extract_structured_document(
         invoice = SupplierInvoiceData.model_validate(result.data)
         apply_split_item_row_fallback(content, invoice)
         apply_explicit_no_vat_fallback(content.text, invoice)
+        apply_degraded_invoice_fallbacks(content, invoice)
         apply_french_invoice_fallbacks(content.text, invoice)
         result.data = invoice.model_dump()
         validation = SupplierInvoiceValidator().validate(invoice)
