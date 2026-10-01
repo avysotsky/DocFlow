@@ -13,6 +13,7 @@ public static class ApiKeyAuthenticationDefaults
     public const string ConfigurationSection = "Authentication:ApiKey";
     public const string DefaultHeaderName = "X-DocFlow-Api-Key";
     public const string CustomerIdClaimType = "docflow:customer_id";
+    public const string ClientNameClaimType = "docflow:client_name";
 }
 
 public sealed class ApiKeyAuthenticationOptions
@@ -84,7 +85,8 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
         {
             new Claim(ClaimTypes.NameIdentifier, clientName),
             new Claim(ClaimTypes.Name, clientName),
-            new Claim(ApiKeyAuthenticationDefaults.CustomerIdClaimType, customerId)
+            new Claim(ApiKeyAuthenticationDefaults.CustomerIdClaimType, customerId),
+            new Claim(ApiKeyAuthenticationDefaults.ClientNameClaimType, clientName)
         };
 
         var identity = new ClaimsIdentity(claims, Scheme.Name);
@@ -116,5 +118,17 @@ public static class ClaimsPrincipalExtensions
         }
 
         return customerId;
+    }
+
+    public static string GetRequiredClientName(this ClaimsPrincipal principal)
+    {
+        var value = principal.FindFirst(ApiKeyAuthenticationDefaults.ClientNameClaimType)?.Value;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException(
+                "The authenticated principal does not contain a valid DocFlow client name.");
+        }
+
+        return value.Trim();
     }
 }

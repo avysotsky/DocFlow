@@ -39,6 +39,7 @@ public sealed class DocumentReviewsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var customerId = User.GetRequiredCustomerId();
+        var reviewedByClient = User.GetRequiredClientName();
         var isOwned = await _dbContext.Documents
             .AsNoTracking()
             .AnyAsync(
@@ -62,6 +63,7 @@ public sealed class DocumentReviewsController : ControllerBase
             request.ExpectedExtractionResultId,
             request.Data.GetRawText(),
             request.Note,
+            reviewedByClient,
             cancellationToken);
 
         return result.Outcome switch
@@ -72,7 +74,8 @@ public sealed class DocumentReviewsController : ControllerBase
                 result.Review.ReviewId,
                 result.Review.ReviewedAt,
                 result.Review.DocumentStatus,
-                result.Review.Note)),
+                result.Review.Note,
+                result.Review.ReviewedByClient)),
             DocumentReviewOutcome.DocumentNotFound => NotFound(),
             DocumentReviewOutcome.ExtractionResultNotFound => NotFound(),
             DocumentReviewOutcome.StaleExtractionResult => Conflict(
@@ -99,5 +102,6 @@ public sealed class DocumentReviewsController : ControllerBase
         Guid ReviewId,
         DateTimeOffset ReviewedAt,
         string DocumentStatus,
-        string? Note);
+        string? Note,
+        string ReviewedByClient);
 }

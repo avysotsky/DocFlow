@@ -22,6 +22,9 @@ public sealed class DocumentReviewConfiguration : IEntityTypeConfiguration<Docum
         builder.Property(x => x.ReviewedAt)
             .IsRequired();
 
+        builder.Property(x => x.ReviewedByClient)
+            .HasMaxLength(DocumentReview.MaxReviewedByClientLength);
+
         builder.HasOne<Document>()
             .WithOne()
             .HasForeignKey<DocumentReview>(x => x.DocumentId)

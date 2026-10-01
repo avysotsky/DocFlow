@@ -232,6 +232,7 @@ public sealed class DocumentsController : ControllerBase
             result.CreatedAt,
             result.Review?.Id,
             result.Review?.ReviewedAt,
+            result.Review?.ReviewedByClient,
             result.Review?.Note));
     }
 
@@ -552,6 +553,7 @@ public sealed class DocumentsController : ControllerBase
         DateTimeOffset CreatedAt,
         Guid? ReviewId,
         DateTimeOffset? ReviewedAt,
+        string? ReviewedByClient,
         string? ReviewNote);
 
     private sealed record DocumentInboxProjection(

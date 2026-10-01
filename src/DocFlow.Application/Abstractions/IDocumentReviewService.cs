@@ -7,6 +7,7 @@ public interface IDocumentReviewService
         Guid expectedExtractionResultId,
         string correctedDataJson,
         string? note,
+        string reviewedByClient,
         CancellationToken cancellationToken = default);
 }
 
@@ -26,7 +27,8 @@ public sealed record ReviewedDocument(
     Guid ReviewId,
     DateTimeOffset ReviewedAt,
     string DocumentStatus,
-    string? Note);
+    string? Note,
+    string ReviewedByClient);
 
 public sealed record DocumentReviewResult(
     DocumentReviewOutcome Outcome,

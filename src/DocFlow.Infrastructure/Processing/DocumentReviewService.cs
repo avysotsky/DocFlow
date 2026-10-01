@@ -21,6 +21,7 @@ public sealed class DocumentReviewService : IDocumentReviewService
         Guid expectedExtractionResultId,
         string correctedDataJson,
         string? note,
+        string reviewedByClient,
         CancellationToken cancellationToken = default)
     {
         var document = await _dbContext.Documents
@@ -54,7 +55,8 @@ public sealed class DocumentReviewService : IDocumentReviewService
             documentId,
             extractionResult.Id,
             correctedDataJson,
-            note);
+            note,
+            reviewedByClient);
 
         _dbContext.DocumentReviews.Add(review);
         document.MarkProcessed(document.DocumentType);
@@ -80,6 +82,7 @@ public sealed class DocumentReviewService : IDocumentReviewService
                 review.Id,
                 review.ReviewedAt,
                 document.Status.ToString(),
-                review.Note));
+                review.Note,
+                review.ReviewedByClient!));
     }
 }

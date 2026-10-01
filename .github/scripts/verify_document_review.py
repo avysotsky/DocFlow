@@ -58,6 +58,7 @@ def main() -> None:
     parser.add_argument("--api-key", required=True)
     parser.add_argument("--review-document-id", required=True)
     parser.add_argument("--processed-document-id", required=True)
+    parser.add_argument("--expected-client-name", default="e2e-primary")
     args = parser.parse_args()
 
     base = args.base_url.rstrip("/")
@@ -72,6 +73,7 @@ def main() -> None:
     assert before["validationStatus"] == "Invalid", before
     assert before["reviewId"] is None, before
     assert before["reviewedAt"] is None, before
+    assert before["reviewedByClient"] is None, before
     assert before["structuredData"]["data"]["total"] == "1748.42", before
 
     corrected_data = dict(before["structuredData"]["data"])
@@ -109,12 +111,15 @@ def main() -> None:
             "expectedExtractionResultId": extraction_result_id,
             "data": corrected_data,
             "note": "Correct arithmetic total after human review.",
+            "reviewedByClient": "spoofed-human",
         },
     )
     assert status == 200 and isinstance(reviewed, dict), (status, reviewed)
     assert reviewed["documentId"] == args.review_document_id, reviewed
     assert reviewed["extractionResultId"] == extraction_result_id, reviewed
     assert reviewed["documentStatus"] == "Processed", reviewed
+    assert reviewed["reviewedByClient"] == args.expected_client_name, reviewed
+    assert reviewed["reviewedByClient"] != "spoofed-human", reviewed
     review_id = reviewed["reviewId"]
     assert review_id, reviewed
     assert reviewed["reviewedAt"], reviewed
@@ -133,9 +138,14 @@ def main() -> None:
     assert after["validationStatus"] == "Invalid", after
     assert after["reviewId"] == review_id, after
     assert after["reviewedAt"], after
+    assert after["reviewedByClient"] == args.expected_client_name, after
     assert after["reviewNote"] == "Correct arithmetic total after human review.", after
     assert after["structuredData"]["data"]["total"] == "1748.40", after
     assert after["structuredData"]["human_review"]["review_id"] == review_id, after
+    assert (
+        after["structuredData"]["human_review"]["reviewed_by_client"]
+        == args.expected_client_name
+    ), after
 
     status, csv_bytes = get_bytes(
         f"{base}/api/documents/{args.review_document_id}/export?format=csv",
@@ -148,6 +158,7 @@ def main() -> None:
     }
     assert rows["data.total"] == "1748.40", rows.get("data.total")
     assert rows["human_review.review_id"] == review_id, rows
+    assert rows["human_review.reviewed_by_client"] == args.expected_client_name, rows
 
     status, _ = request_json(
         "PUT",
@@ -192,8 +203,8 @@ def main() -> None:
 
     print(
         "Document review E2E passed: stale/malformed writes rejected, NeedsReview corrected to "
-        "Processed, original extraction id preserved, reviewed data returned and exported, "
-        "duplicate/non-reviewable/missing reviews handled predictably."
+        "Processed, authenticated client attribution persisted without trusting payload identity, "
+        "reviewed data returned/exported, duplicate/non-reviewable/missing reviews handled predictably."
     )
 
 

@@ -115,6 +115,10 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("ReviewedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ReviewedByClient")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DocumentId")

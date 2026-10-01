@@ -31,6 +31,7 @@ public static class ReviewedStructuredDataComposer
         {
             ["review_id"] = review.Id.ToString(),
             ["reviewed_at"] = review.ReviewedAt.ToString("O"),
+            ["reviewed_by_client"] = review.ReviewedByClient,
             ["note"] = review.Note
         };
 
