@@ -52,8 +52,10 @@ public sealed class Document
         StorageKey = storageKey.Trim();
         Size = size;
         Status = DocumentStatus.Uploaded;
-        CreatedAt = DateTimeOffset.UtcNow;
-        DeleteAt = deleteAt;
+        CreatedAt = TruncateToPostgreSqlTimestampPrecision(DateTimeOffset.UtcNow);
+        DeleteAt = deleteAt is { } value
+            ? TruncateToPostgreSqlTimestampPrecision(value)
+            : null;
     }
 
     public void BeginProcessingAttempt()
@@ -103,5 +105,12 @@ public sealed class Document
     {
         LastProcessingFailureAt = null;
         LastProcessingError = null;
+    }
+
+    private static DateTimeOffset TruncateToPostgreSqlTimestampPrecision(DateTimeOffset value)
+    {
+        const long ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000;
+        var truncatedTicks = value.Ticks - value.Ticks % ticksPerMicrosecond;
+        return new DateTimeOffset(truncatedTicks, value.Offset);
     }
 }
