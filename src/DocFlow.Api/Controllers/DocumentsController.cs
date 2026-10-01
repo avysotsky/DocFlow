@@ -476,7 +476,7 @@ public sealed class DocumentsController : ControllerBase
                 validationStatus = ValidationStatus.Valid;
                 return true;
             case "invalid":
-                validationStatus = ValidationStatus.NeedsReview;
+                validationStatus = ValidationStatus.Invalid;
                 return true;
             case "incomplete":
                 validationStatus = ValidationStatus.NeedsReview;
