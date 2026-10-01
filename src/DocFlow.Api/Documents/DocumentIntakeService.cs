@@ -65,17 +65,16 @@ public sealed class DocumentIntakeService
                 Error: validationError);
         }
 
-        // Validation guarantees file is non-null from this point.
-        file!;
+        var validatedFile = file!;
 
         string storageKey;
         try
         {
-            await using var input = file.OpenReadStream();
+            await using var input = validatedFile.OpenReadStream();
             storageKey = await _fileStorage.UploadAsync(
                 input,
-                file.FileName,
-                file.ContentType,
+                validatedFile.FileName,
+                validatedFile.ContentType,
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -87,11 +86,11 @@ public sealed class DocumentIntakeService
             _logger.LogError(
                 exception,
                 "Document intake storage upload failed for file {FileName}.",
-                file.FileName);
+                validatedFile.FileName);
 
             return new DocumentIntakeResult(
                 DocumentIntakeOutcome.Failed,
-                file.FileName,
+                validatedFile.FileName,
                 Error: "The document could not be stored.");
         }
 
@@ -101,10 +100,10 @@ public sealed class DocumentIntakeService
 
         var document = new Document(
             customerId,
-            file.FileName,
-            file.ContentType,
+            validatedFile.FileName,
+            validatedFile.ContentType,
             storageKey,
-            file.Length,
+            validatedFile.Length,
             deleteAt);
 
         try
@@ -126,11 +125,11 @@ public sealed class DocumentIntakeService
             _logger.LogError(
                 exception,
                 "Document intake persistence failed for file {FileName}.",
-                file.FileName);
+                validatedFile.FileName);
 
             return new DocumentIntakeResult(
                 DocumentIntakeOutcome.Failed,
-                file.FileName,
+                validatedFile.FileName,
                 Error: "The document could not be persisted.");
         }
 
