@@ -26,15 +26,30 @@ def apply_french_invoice_fallbacks(text: str, invoice: SupplierInvoiceData) -> N
     normalized = " ".join(text.split())
 
     if invoice.invoice_number is None:
-        match = re.search(
-            r"\b(?P<number>F\d{8})\b\s+(?P<date>\d{2}/\d{2}/\d{4})\b",
+        labelled_number = re.search(
+            r"\bFACTURE\s+N[°ºO]?\s*:\s*(?P<number>F\d{8})(?!\d)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        adjacent_number_and_date = re.search(
+            r"\b(?P<number>F\d{8})(?!\d)\s+(?P<date>\d{2}/\d{2}/\d{4})\b",
             normalized,
             flags=re.IGNORECASE,
         )
-        if match is not None:
-            invoice.invoice_number = match.group("number")
-            if invoice.invoice_date is None:
-                invoice.invoice_date = _parse_french_date(match.group("date"))
+        number_match = labelled_number or adjacent_number_and_date
+        if number_match is not None:
+            invoice.invoice_number = number_match.group("number")
+
+        if invoice.invoice_date is None:
+            date_match = re.search(
+                r"\bDate\s*:\s*(?P<date>\d{2}/\d{2}/\d{4})\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            if date_match is None and adjacent_number_and_date is not None:
+                date_match = adjacent_number_and_date
+            if date_match is not None:
+                invoice.invoice_date = _parse_french_date(date_match.group("date"))
 
     if invoice.due_date is None:
         due = re.search(
@@ -50,9 +65,14 @@ def apply_french_invoice_fallbacks(text: str, invoice: SupplierInvoiceData) -> N
     ):
         invoice.currency = "EUR"
 
-    subtotal = _labeled_amount(normalized, r"TOTAL\s+HT")
-    vat_amount = _labeled_amount(normalized, r"TOTAL\s+TVA")
-    total = _labeled_amount(normalized, r"TOTAL\s+TTC")
+    parallel_totals = _parallel_totals_summary(text)
+    if parallel_totals is not None:
+        subtotal, vat_amount, total = parallel_totals
+    else:
+        subtotal = _labeled_amount(normalized, r"TOTAL\s+HT")
+        vat_amount = _labeled_amount(normalized, r"TOTAL\s+TVA")
+        total = _labeled_amount(normalized, r"TOTAL\s+TTC")
+
     if subtotal is not None:
         invoice.subtotal = subtotal
     if vat_amount is not None:
@@ -106,6 +126,33 @@ def parse_french_decimal(value: str) -> Decimal | None:
         return Decimal(compact)
     except InvalidOperation:
         return None
+
+
+def _parallel_totals_summary(
+    text: str,
+) -> tuple[Decimal, Decimal, Decimal] | None:
+    """Parse aligned TOTAL HT / TOTAL TVA / TOTAL TTC columns from layout text."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        lower = line.lower()
+        if not all(label in lower for label in ("total ht", "total tva", "total ttc")):
+            continue
+
+        # Layout-preserving PDF extraction can put the three labels on one row and
+        # their three monetary values on a following row, with unrelated prose between.
+        for candidate in lines[index + 1 : index + 5]:
+            values = re.findall(
+                r"[-+]?\d+(?:[ .]\d{3})*(?:,\d{1,2}|\.\d{1,2})",
+                candidate,
+            )
+            if len(values) < 3:
+                continue
+
+            parsed = [parse_french_decimal(value) for value in values[:3]]
+            if all(value is not None for value in parsed):
+                return parsed[0], parsed[1], parsed[2]  # type: ignore[return-value]
+
+    return None
 
 
 def _labeled_amount(text: str, label_pattern: str) -> Decimal | None:
