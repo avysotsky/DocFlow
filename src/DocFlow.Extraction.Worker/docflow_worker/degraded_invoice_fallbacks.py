@@ -9,7 +9,7 @@ from docflow_worker.supplier_invoice_models import SupplierInvoiceData
 
 
 _TEXTUAL_DATE = re.compile(
-    r"\binvoice\s+date\b[^0-9]{0,20}"
+    r"\binvoice\s+date\b[^0-9\r\n]{0,180}"
     r"(?P<date>\d{1,2}[\s./-]+[A-Za-z]{3,9}[\s./-]+\d{2,4})\b",
     re.IGNORECASE,
 )
