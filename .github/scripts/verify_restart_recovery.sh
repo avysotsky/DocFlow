@@ -4,10 +4,15 @@ set -euo pipefail
 base_url="${DOCFLOW_BASE_URL:-http://127.0.0.1:5080}"
 api_key="${DOCFLOW_API_KEY:-docflow-e2e-primary-key}"
 customer_id="${DOCFLOW_CUSTOMER_ID:-11111111-1111-1111-1111-111111111111}"
+other_customer_id='44444444-4444-4444-4444-444444444444'
 storage_root="${FileStorage__RootPath:-/tmp/docflow-recovery-storage}"
 
 uploaded_document_id='55555555-5555-5555-5555-555555555551'
 processing_document_id='55555555-5555-5555-5555-555555555552'
+uploaded_conflict_document_id='55555555-5555-5555-5555-555555555553'
+processing_conflict_document_id='55555555-5555-5555-5555-555555555554'
+failed_delete_document_id='55555555-5555-5555-5555-555555555555'
+review_id='55555555-5555-5555-5555-555555555556'
 other_fixture_document_id='44444444-4444-4444-4444-444444444445'
 api_pid=''
 
@@ -84,6 +89,10 @@ wait_for_status() {
   cat /tmp/docflow-recovery-api.log
   echo "Document $document_id did not reach $expected_status; last status: $status"
   return 1
+}
+
+http_code() {
+  curl -sS -o /dev/null -w '%{http_code}' "$@"
 }
 
 cleanup() {
@@ -168,3 +177,93 @@ recovery_result_count=$(psql_cmd -At -c \
 test "$recovery_result_count" = '2'
 
 echo "Restart recovery E2E passed: Uploaded and orphaned Processing work recovered after host restart without reprocessing completed documents."
+
+echo "Scenario 10: terminal document deletion removes file and cascaded data"
+
+uploaded_result_id=$(psql_cmd -At -c \
+  "SELECT \"Id\" FROM \"ExtractionResults\" WHERE \"DocumentId\" = '$uploaded_document_id';")
+test -n "$uploaded_result_id"
+
+psql_cmd -c \
+  "INSERT INTO \"DocumentReviews\" (\"Id\", \"DocumentId\", \"ExtractionResultId\", \"CorrectedDataJson\", \"Note\", \"ReviewedAt\") VALUES ('$review_id', '$uploaded_document_id', '$uploaded_result_id', '{\"verified\":true}'::jsonb, 'delete cascade fixture', NOW());"
+
+test -f "$storage_root/recovery/uploaded.pdf"
+
+# Active rows are inserted only after startup so the recovery service does not own them.
+psql_cmd -c \
+  "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$uploaded_conflict_document_id', '$customer_id', 'delete-conflict-uploaded.pdf', 'application/pdf', 'recovery/conflict-uploaded.pdf', 1, 'Uploaded', NOW());"
+psql_cmd -c \
+  "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$processing_conflict_document_id', '$customer_id', 'delete-conflict-processing.pdf', 'application/pdf', 'recovery/conflict-processing.pdf', 1, 'Processing', NOW());"
+psql_cmd -c \
+  "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$failed_delete_document_id', '$customer_id', 'delete-failed.pdf', 'application/pdf', 'recovery/missing-failed.pdf', 1, 'Failed', NOW());"
+psql_cmd -c \
+  "INSERT INTO \"Documents\" (\"Id\", \"CustomerId\", \"OriginalFileName\", \"ContentType\", \"StorageKey\", \"Size\", \"Status\", \"CreatedAt\") VALUES ('$other_fixture_document_id', '$other_customer_id', 'delete-other-tenant.pdf', 'application/pdf', 'recovery/other-tenant.pdf', 1, 'Processed', NOW());"
+
+cross_tenant_delete_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -X DELETE "$base_url/api/documents/$other_fixture_document_id")
+test "$cross_tenant_delete_code" = '404'
+
+uploaded_conflict_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -X DELETE "$base_url/api/documents/$uploaded_conflict_document_id")
+test "$uploaded_conflict_code" = '409'
+
+processing_conflict_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -X DELETE "$base_url/api/documents/$processing_conflict_document_id")
+test "$processing_conflict_code" = '409'
+
+active_rows=$(psql_cmd -At -c \
+  "SELECT COUNT(*) FROM \"Documents\" WHERE \"Id\" IN ('$uploaded_conflict_document_id', '$processing_conflict_document_id');")
+test "$active_rows" = '2'
+
+delete_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -X DELETE "$base_url/api/documents/$uploaded_document_id")
+test "$delete_code" = '204'
+
+test ! -e "$storage_root/recovery/uploaded.pdf"
+
+remaining_related_rows=$(psql_cmd -At -c \
+  "SELECT (SELECT COUNT(*) FROM \"Documents\" WHERE \"Id\" = '$uploaded_document_id') + (SELECT COUNT(*) FROM \"ExtractionResults\" WHERE \"DocumentId\" = '$uploaded_document_id') + (SELECT COUNT(*) FROM \"DocumentReviews\" WHERE \"DocumentId\" = '$uploaded_document_id');")
+test "$remaining_related_rows" = '0'
+
+for deleted_path in \
+  "/api/documents/$uploaded_document_id" \
+  "/api/documents/$uploaded_document_id/processing-diagnostics" \
+  "/api/documents/$uploaded_document_id/extraction-result" \
+  "/api/documents/$uploaded_document_id/export?format=csv"; do
+  deleted_code=$(http_code \
+    -H "X-DocFlow-Api-Key: $api_key" \
+    "$base_url$deleted_path")
+  test "$deleted_code" = '404'
+done
+
+review_after_delete_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -H 'Content-Type: application/json' \
+  -X PUT \
+  -d '{}' \
+  "$base_url/api/documents/$uploaded_document_id/review")
+test "$review_after_delete_code" = '404'
+
+repeat_delete_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -X DELETE "$base_url/api/documents/$uploaded_document_id")
+test "$repeat_delete_code" = '404'
+
+failed_delete_code=$(http_code \
+  -H "X-DocFlow-Api-Key: $api_key" \
+  -X DELETE "$base_url/api/documents/$failed_delete_document_id")
+test "$failed_delete_code" = '204'
+
+failed_remaining=$(psql_cmd -At -c \
+  "SELECT COUNT(*) FROM \"Documents\" WHERE \"Id\" = '$failed_delete_document_id';")
+test "$failed_remaining" = '0'
+
+# Remove direct fixtures that intentionally remain after conflict/isolation checks.
+psql_cmd -c \
+  "DELETE FROM \"Documents\" WHERE \"Id\" IN ('$uploaded_conflict_document_id', '$processing_conflict_document_id', '$other_fixture_document_id');"
+
+echo "Document deletion E2E passed: tenant isolation, active-state conflicts, terminal deletion, file cleanup and database cascades verified."

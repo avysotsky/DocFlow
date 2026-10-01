@@ -27,8 +27,10 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
         var document = await _dbContext.Documents
             .SingleOrDefaultAsync(x => x.Id == documentId, cancellationToken);
 
+        // A document may have been explicitly deleted after it was queued.
+        // Treat that as a successful no-op instead of retrying a legitimate absence.
         if (document is null)
-            throw new KeyNotFoundException($"Document '{documentId}' was not found.");
+            return;
 
         var alreadyProcessed = await _dbContext.ExtractionResults
             .AnyAsync(x => x.DocumentId == documentId, cancellationToken);
@@ -55,8 +57,9 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
 
             if (saveResult.Outcome == ExtractionResultSaveOutcome.DocumentNotFound)
             {
-                throw new InvalidOperationException(
-                    $"Document '{documentId}' disappeared while its extraction result was being saved.");
+                // Explicit deletion can win the race after extraction started. The requested
+                // lifecycle operation is authoritative, so do not recreate or fail the document.
+                return;
             }
 
             // AlreadyExists is intentionally treated as success. It can happen after a retry

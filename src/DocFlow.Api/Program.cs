@@ -1,6 +1,7 @@
 using DocFlow.Api.Authentication;
 using DocFlow.Api.BackgroundServices;
 using DocFlow.Application.Abstractions;
+using DocFlow.Infrastructure.Documents;
 using DocFlow.Infrastructure.Export;
 using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
@@ -64,6 +65,7 @@ builder.Services.AddDbContext<DocFlowDbContext>(options =>
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
 builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExportService>();
 builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();
+builder.Services.AddScoped<IDocumentDeletionService, DocumentDeletionService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
 
