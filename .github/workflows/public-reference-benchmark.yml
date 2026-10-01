@@ -1,4 +1,5 @@
 name: Public Reference Benchmark
+# Validation batch: French multi-rate VAT + fr-FR locale
 
 on:
   push:
