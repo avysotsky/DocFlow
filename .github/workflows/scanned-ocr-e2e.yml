@@ -1,4 +1,5 @@
 name: Scanned OCR E2E
+# Milestone validation: 1.1.1.6 HardCases closure
 
 on:
   push:
