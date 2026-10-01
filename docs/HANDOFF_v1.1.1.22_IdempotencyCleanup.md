@@ -1,26 +1,44 @@
 # DocFlow — handoff v1.1.1.22 Idempotency Cleanup
 
-Status: **ACTIVE**  
+Status: **COMPLETED**  
 Repository: `avysotsky/DocFlow`  
 Branch: `DocFlow/v_1.1.1.22_IdempotencyCleanup`  
 Base: `DocFlow/v_1.1.1.21_IntakeIdempotency`
 
-## Why this milestone exists
+## 1. Milestone result
 
-`v1.1.1.21` added logical expiry for persisted single-upload idempotency records. Expired keys can be reused correctly, but one-off expired rows that are never reused remain in `IntakeIdempotencyRecords`, so high-volume unique keys can grow the table indefinitely.
+Expired `IntakeIdempotencyRecords` are now physically removed by a dedicated bounded single-instance hosted cleanup service.
 
-## Scope
+Implementation commit:
 
-1. Add a dedicated single-instance hosted cleanup service for expired `IntakeIdempotencyRecords`.
-2. Reuse the existing `Intake:Idempotency` configuration section with a configurable cleanup interval and bounded cleanup batch size.
-3. Delete only rows whose `ExpiresAt <= now`.
-4. For every candidate, acquire the same PostgreSQL transaction advisory lock scope used by intake (`CustomerId + Key`) before deleting.
-5. Re-check expiry after the lock is acquired so a key concurrently renewed by intake is not deleted.
-6. Keep document retention and idempotency housekeeping separate.
-7. Do not add a distributed scheduler, Redis, queue, or new database schema.
-8. Extend Automation E2E to prove expired rows are removed, unexpired rows remain, bounded repeated sweeps work, and existing intake idempotency remains green.
+```text
+4a5d16cdd431fb6470df6ed2de9171b84aa876b7
+Add bounded idempotency record cleanup
+```
 
-## Configuration target
+Final validation:
+
+```text
+.NET CI #37
+run id: 36901767125
+result: success
+
+Automation E2E #113
+run id: 36901767040
+result: success
+```
+
+No database migration was required.
+
+## 2. Runtime cleanup
+
+New hosted service:
+
+```text
+IntakeIdempotencyCleanupHostedService
+```
+
+Default configuration:
 
 ```json
 {
@@ -34,31 +52,110 @@ Base: `DocFlow/v_1.1.1.21_IntakeIdempotency`
 }
 ```
 
-Cleanup is always available because persisted idempotency itself is optional per request; with no records the hourly query is effectively idle.
-
-## Concurrency contract
-
-Cleanup must not race an expired-key reuse into a `DbUpdateConcurrencyException` or delete a newly renewed row.
-
-For each candidate:
+Startup validation:
 
 ```text
-begin DB transaction
--> acquire pg_advisory_xact_lock(hash(customer + key))
--> DELETE WHERE CustomerId/Key match AND ExpiresAt <= cutoff
--> commit
+RetentionHours: 1..720
+CleanupIntervalSeconds: 1..86400
+CleanupBatchSize: 1..5000
 ```
 
-The lock scope string and SQL semantics must match `DocumentIntakeService`.
+The service runs one sweep immediately after startup and then delays for the configured interval.
 
-## Acceptance
+Each sweep selects at most `CleanupBatchSize` records where:
 
 ```text
-expired records are physically removed
-unexpired records are preserved
-cleanup is bounded by configured batch size per sweep
-multiple sweeps eventually drain more than one batch
-normal Idempotency-Key replay/conflict/concurrency remains green
-no document rows/files are touched
-.NET CI + Automation E2E green
+ExpiresAt <= cutoff
 ```
+
+Candidates are ordered by expiry, tenant and key for deterministic bounded work.
+
+## 3. Concurrency safety
+
+Cleanup coordinates with normal idempotent intake rather than deleting expired rows blindly.
+
+For every selected candidate it opens a database transaction and acquires the same PostgreSQL transaction advisory lock scope used by `DocumentIntakeService`:
+
+```text
+{CustomerId:N}:{IdempotencyKey}
+```
+
+using:
+
+```text
+pg_advisory_xact_lock(hashtextextended(lockScope, 0))
+```
+
+Only after the lock is acquired does cleanup execute a conditional delete that re-checks:
+
+```text
+CustomerId == candidate.CustomerId
+Key == candidate.Key
+ExpiresAt <= original sweep cutoff
+```
+
+Therefore:
+
+```text
+cleanup wins lock first -> expired row is deleted; later intake inserts a fresh row
+intake wins lock first and renews row -> cleanup re-check deletes 0 rows and skips it
+```
+
+This avoids deleting a newly renewed record and avoids an expired-key reuse racing into an EF concurrency failure.
+
+## 4. Lifecycle boundary
+
+Idempotency cleanup is intentionally separate from business-document retention.
+
+It does not:
+
+- delete `Documents`;
+- delete source PDFs;
+- use `IDocumentDeletionService`;
+- alter document `DeleteAt`;
+- introduce a foreign key from idempotency records to documents.
+
+The idempotency table remains independent of the document lifecycle, preserving replay after document deletion until the key itself expires.
+
+## 5. E2E coverage
+
+Automation E2E #113 configures:
+
+```text
+CleanupIntervalSeconds = 1
+CleanupBatchSize = 1
+```
+
+The test seeds:
+
+```text
+2 expired idempotency rows
+1 unexpired idempotency row
+```
+
+With a batch size of one, multiple sweeps are required to drain both expired rows. The final assertion requires:
+
+```text
+expired rows remaining = 0
+unexpired rows remaining = 1
+```
+
+The same E2E run then executes the existing single-upload idempotency tests, including replay, different-payload `409`, tenant isolation, rejected replay, concurrent same-key intake and replay after document deletion. Restart recovery regression also remained green.
+
+## 6. Scope boundary
+
+Still intentionally deferred:
+
+- batch request idempotency;
+- semantic/content deduplication;
+- Redis/external lock infrastructure;
+- distributed queue/leases/schedulers;
+- per-tenant retention policy;
+- named-human IAM;
+- external metrics/tracing aggregation.
+
+## 7. Recommended next milestone
+
+Strong next candidate: `v1.1.1.23_BatchIdempotency`.
+
+Do not simply reuse the single-upload response snapshot shape. Batch intake is partial-success: one request can contain accepted, rejected and failed files. First define a persisted request-level replay contract covering item order, per-item results, retryable infrastructure failures and whether a partially failed original batch is replayable or retryable.
