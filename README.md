@@ -9,6 +9,7 @@ The system converts digital or scanned PDF documents into validated structured d
 ```text
 Authenticated customer API
   -> PDF upload
+  -> startup recovery of orphaned Uploaded/Processing work
   -> bounded background processing attempts
   -> automatic digital/scanned handling
   -> native text extraction or conditional Tesseract OCR
@@ -91,7 +92,22 @@ GET /api/documents/{id}/processing-diagnostics
 
 The response includes the current status, persisted processing-attempt count, last attempt/failure timestamps, and a bounded sanitized technical failure summary. Full exception detail remains in application logs rather than being exposed to API clients.
 
-The queue itself is still in-memory. Bounded retry improves transient-failure handling but does not yet provide durable job recovery across process restarts.
+## Restart recovery
+
+The runtime queue is still an in-memory single-reader `Channel<Guid>`, but queued work is reconciled from PostgreSQL whenever the host starts.
+
+Before the normal queue consumer starts, DocFlow discovers documents that:
+
+```text
+Status == Uploaded or Processing
+and no ExtractionResult exists
+```
+
+Those document ids are re-enqueued in created order. This covers both work that was queued but never started and work that was interrupted while `Processing` when the previous process stopped.
+
+Completed `Processed`/`NeedsReview` documents are not re-enqueued, and `Failed` documents remain failed unless a caller explicitly requests processing again.
+
+This recovery contract is intentionally scoped to the current **single-instance MVP**. It is not a distributed queue, lease or multi-worker coordination mechanism. If DocFlow later runs multiple active application instances, introduce explicit distributed ownership/queue semantics rather than relying on startup reconciliation alone.
 
 ## Production deployment
 
@@ -161,7 +177,7 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints, processing diagnostics, health probes and background-service host.
+- **DocFlow.Api** — authenticated HTTP endpoints, processing diagnostics, startup recovery, health probes and background-service host.
 - **DocFlow.Application** — processing/export/review abstractions and orchestration contracts.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review and export implementation.
@@ -189,8 +205,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, and bounded technical-failure retries with persisted processing diagnostics.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, and single-instance restart recovery from PostgreSQL.
 
-The next operational gap is restart recovery for the still in-memory processing queue. A narrow recovery milestone should be considered before introducing a full external broker: on startup, safely reconcile persisted `Uploaded`/stale `Processing` documents and re-enqueue work using the existing idempotency guarantees.
+The next product gap should be selected from customer data lifecycle/retention and reviewer audit identity. Retention/delete is the narrower next candidate because document storage currently has no customer-visible lifecycle operation even though the domain already carries deletion metadata.
 
 Production code remains private. A separate public portfolio repository may be created later.
