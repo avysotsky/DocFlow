@@ -3,6 +3,7 @@ using DocFlow.Application.Abstractions;
 using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
+using DocFlow.Infrastructure.Processing;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -180,24 +181,31 @@ public sealed class DocumentsController : ControllerBase
         Guid id,
         CancellationToken cancellationToken)
     {
-        var result = await _dbContext.ExtractionResults
-            .AsNoTracking()
-            .Where(x => x.DocumentId == id)
-            .Select(x => new
-            {
-                x.Id,
-                x.DocumentId,
-                x.StructuredDataJson,
-                x.Confidence,
-                x.ValidationStatus,
-                x.CreatedAt
-            })
+        var result = await (
+                from extractionResult in _dbContext.ExtractionResults.AsNoTracking()
+                join review in _dbContext.DocumentReviews.AsNoTracking()
+                    on extractionResult.DocumentId equals review.DocumentId into reviews
+                from review in reviews.DefaultIfEmpty()
+                where extractionResult.DocumentId == id
+                select new
+                {
+                    extractionResult.Id,
+                    extractionResult.DocumentId,
+                    extractionResult.StructuredDataJson,
+                    extractionResult.Confidence,
+                    extractionResult.ValidationStatus,
+                    extractionResult.CreatedAt,
+                    Review = review
+                })
             .SingleOrDefaultAsync(cancellationToken);
 
         if (result is null)
             return NotFound();
 
-        var structuredData = JsonSerializer.Deserialize<JsonElement>(result.StructuredDataJson);
+        var effectiveStructuredDataJson = ReviewedStructuredDataComposer.Compose(
+            result.StructuredDataJson,
+            result.Review);
+        var structuredData = JsonSerializer.Deserialize<JsonElement>(effectiveStructuredDataJson);
 
         return Ok(new GetExtractionResultResponse(
             result.Id,
@@ -205,7 +213,10 @@ public sealed class DocumentsController : ControllerBase
             structuredData,
             result.Confidence,
             result.ValidationStatus.ToString(),
-            result.CreatedAt));
+            result.CreatedAt,
+            result.Review?.Id,
+            result.Review?.ReviewedAt,
+            result.Review?.Note));
     }
 
     [HttpPost("{id:guid}/extraction-result")]
@@ -503,7 +514,10 @@ public sealed class DocumentsController : ControllerBase
         JsonElement StructuredData,
         decimal? Confidence,
         string ValidationStatus,
-        DateTimeOffset CreatedAt);
+        DateTimeOffset CreatedAt,
+        Guid? ReviewId,
+        DateTimeOffset? ReviewedAt,
+        string? ReviewNote);
 
     private sealed record DocumentInboxProjection(
         Guid Id,
