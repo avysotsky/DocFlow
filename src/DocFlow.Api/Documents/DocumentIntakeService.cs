@@ -398,8 +398,9 @@ public sealed class DocumentIntakeService
 
     private Document CreateDocument(Guid customerId, IFormFile file, string storageKey)
     {
-        var deleteAt = _retentionOptions.Enabled
-            ? DateTimeOffset.UtcNow.AddDays(_retentionOptions.DefaultRetentionDays)
+        var retentionPolicy = _retentionOptions.Resolve(customerId);
+        var deleteAt = retentionPolicy.Enabled
+            ? DateTimeOffset.UtcNow.AddDays(retentionPolicy.RetentionDays)
             : (DateTimeOffset?)null;
 
         return new Document(

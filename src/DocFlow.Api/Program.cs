@@ -67,6 +67,23 @@ builder.Services
     .Validate(
         options => options.BatchSize is >= 1 and <= 1000,
         "Retention BatchSize must be between 1 and 1000.")
+    .Validate(
+        options => options.TenantOverrides.All(tenant => tenant.CustomerId != Guid.Empty),
+        "Every retention tenant override must have a non-empty CustomerId.")
+    .Validate(
+        options => options.TenantOverrides
+            .Select(tenant => tenant.CustomerId)
+            .Distinct()
+            .Count() == options.TenantOverrides.Count,
+        "Retention tenant override CustomerIds must be unique.")
+    .Validate(
+        options => options.TenantOverrides.All(tenant =>
+            tenant.RetentionDays is null or >= 1 and <= 3650),
+        "Retention tenant override RetentionDays must be null or between 1 and 3650.")
+    .Validate(
+        options => options.TenantOverrides.All(tenant =>
+            tenant.Enabled.HasValue || tenant.RetentionDays.HasValue),
+        "Every retention tenant override must override Enabled, RetentionDays, or both.")
     .ValidateOnStart();
 
 builder.Services

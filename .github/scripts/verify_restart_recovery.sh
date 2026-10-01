@@ -3,6 +3,7 @@ set -euo pipefail
 
 base_url="${DOCFLOW_BASE_URL:-http://127.0.0.1:5080}"
 api_key="${DOCFLOW_API_KEY:-docflow-e2e-primary-key}"
+other_api_key="${DOCFLOW_OTHER_API_KEY:-docflow-e2e-other-key}"
 customer_id="${DOCFLOW_CUSTOMER_ID:-11111111-1111-1111-1111-111111111111}"
 other_customer_id='44444444-4444-4444-4444-444444444444'
 storage_root="${FileStorage__RootPath:-/tmp/docflow-recovery-storage}"
@@ -13,6 +14,20 @@ export Retention__Enabled="${Retention__Enabled:-true}"
 export Retention__DefaultRetentionDays="${Retention__DefaultRetentionDays:-7}"
 export Retention__SweepIntervalSeconds="${Retention__SweepIntervalSeconds:-1}"
 export Retention__BatchSize="${Retention__BatchSize:-50}"
+
+# Per-tenant retention test configuration:
+# - primary inherits global Enabled=true but overrides the period to 2 days;
+# - other tenant explicitly disables automatic retention.
+export Retention__TenantOverrides__0__CustomerId="$customer_id"
+export Retention__TenantOverrides__0__RetentionDays="2"
+export Retention__TenantOverrides__1__CustomerId="$other_customer_id"
+export Retention__TenantOverrides__1__Enabled="false"
+
+# The restart step historically configured only the primary API client. Add the second
+# authenticated tenant here so the per-tenant retention opt-out can be exercised.
+export Authentication__ApiKey__Clients__1__Name="e2e-other"
+export Authentication__ApiKey__Clients__1__CustomerId="$other_customer_id"
+export Authentication__ApiKey__Clients__1__ApiKey="$other_api_key"
 
 uploaded_document_id='55555555-5555-5555-5555-555555555551'
 processing_document_id='55555555-5555-5555-5555-555555555552'
@@ -76,12 +91,13 @@ start_api() {
 wait_for_status() {
   local document_id="$1"
   local expected_status="$2"
+  local request_api_key="${3:-$api_key}"
   local status=''
 
   for _ in $(seq 1 30); do
     local document_json
     document_json=$(curl -fsS \
-      -H "X-DocFlow-Api-Key: $api_key" \
+      -H "X-DocFlow-Api-Key: $request_api_key" \
       "$base_url/api/documents/$document_id")
     status=$(printf '%s' "$document_json" | jq -r '.status')
 
@@ -137,7 +153,7 @@ processed_attempts_before=$(curl -fsS \
   | jq -r '.processingAttempts')
 test "$processed_attempts_before" = '1'
 
-echo "Retention check: enabled policy stamps new uploads with future DeleteAt"
+echo "Retention check: primary tenant inherits enabled state and overrides period to 2 days"
 retention_upload_json=$(curl -fsS \
   -H "X-DocFlow-Api-Key: $api_key" \
   -X POST \
@@ -149,8 +165,25 @@ test -n "$retention_upload_id"
 test "$retention_upload_id" != 'null'
 test -n "$retention_delete_at"
 test "$retention_delete_at" != 'null'
-test "$(date -d "$retention_delete_at" +%s)" -gt "$(date +%s)"
+retention_now_epoch=$(date +%s)
+retention_delete_epoch=$(date -d "$retention_delete_at" +%s)
+retention_delta=$((retention_delete_epoch - retention_now_epoch))
+test "$retention_delta" -gt 86400
+test "$retention_delta" -lt 259200
 wait_for_status "$retention_upload_id" 'Processed'
+
+echo "Retention check: second tenant explicitly disables automatic retention"
+other_retention_upload_json=$(curl -fsS \
+  -H "X-DocFlow-Api-Key: $other_api_key" \
+  -X POST \
+  -F 'File=@/tmp/supplier-invoice.pdf;type=application/pdf' \
+  "$base_url/api/documents")
+other_retention_upload_id=$(printf '%s' "$other_retention_upload_json" | jq -r '.id')
+other_retention_delete_at=$(printf '%s' "$other_retention_upload_json" | jq -r '.deleteAt')
+test -n "$other_retention_upload_id"
+test "$other_retention_upload_id" != 'null'
+test "$other_retention_delete_at" = 'null'
+wait_for_status "$other_retention_upload_id" 'Processed' "$other_api_key"
 
 stop_api
 
@@ -387,4 +420,4 @@ psql_cmd -c \
   "DELETE FROM \"Documents\" WHERE \"Id\" IN ('$retention_active_document_id', '$retention_future_document_id');"
 rm -f "$storage_root/recovery/retention-active.pdf" "$storage_root/recovery/retention-future.pdf"
 
-echo "Retention E2E passed: default-off behavior, upload expiry stamping, expired terminal cleanup, active-state skip and future-expiry preservation verified."
+echo "Retention E2E passed: default-off behavior, per-tenant upload policy, expired terminal cleanup, active-state skip and future-expiry preservation verified."

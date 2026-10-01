@@ -28,15 +28,17 @@ public sealed class DocumentRetentionHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.Enabled)
+        if (!_options.IsSweepEnabled)
         {
-            _logger.LogInformation("Document retention sweep is disabled.");
+            _logger.LogInformation("Document retention sweep is disabled for the deployment and all tenant overrides.");
             return;
         }
 
         _logger.LogInformation(
-            "Document retention sweep enabled: {DefaultRetentionDays} day default retention, {SweepIntervalSeconds} second interval, batch size {BatchSize}.",
+            "Document retention sweep enabled: global enabled {GlobalEnabled}, {DefaultRetentionDays} day default retention, {TenantOverrideCount} tenant overrides, {SweepIntervalSeconds} second interval, batch size {BatchSize}.",
+            _options.Enabled,
             _options.DefaultRetentionDays,
+            _options.TenantOverrides.Count,
             _options.SweepIntervalSeconds,
             _options.BatchSize);
 
