@@ -1,5 +1,5 @@
 name: Public Reference Benchmark
-# Validation batch: degraded-scan measurement after manifest metadata fix
+# Validation batch: degraded OCR summary recovery
 
 on:
   push:
