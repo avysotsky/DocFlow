@@ -14,8 +14,28 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.Configure<ApiKeyAuthenticationOptions>(
-    builder.Configuration.GetSection(ApiKeyAuthenticationDefaults.ConfigurationSection));
+var apiKeyOptions = builder.Services
+    .AddOptions<ApiKeyAuthenticationOptions>()
+    .Bind(builder.Configuration.GetSection(ApiKeyAuthenticationDefaults.ConfigurationSection));
+
+if (!builder.Environment.IsDevelopment())
+{
+    apiKeyOptions
+        .Validate(
+            options => options.Clients.Count > 0,
+            "At least one API-key client must be configured outside Development.")
+        .Validate(
+            options => options.Clients.All(client =>
+                client.CustomerId != Guid.Empty && !string.IsNullOrWhiteSpace(client.ApiKey)),
+            "Every API-key client must have a non-empty CustomerId and ApiKey.")
+        .Validate(
+            options => options.Clients
+                .Select(client => client.ApiKey)
+                .Distinct(StringComparer.Ordinal)
+                .Count() == options.Clients.Count,
+            "API keys must be unique.")
+        .ValidateOnStart();
+}
 
 builder.Services
     .AddAuthentication(ApiKeyAuthenticationDefaults.Scheme)
@@ -57,6 +77,13 @@ builder.Services.AddSingleton<IDocumentExtractionRunner>(
         pythonExecutable));
 
 var app = builder.Build();
+
+if (builder.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<DocFlowDbContext>();
+    await dbContext.Database.MigrateAsync();
+}
 
 if (app.Environment.IsDevelopment())
 {

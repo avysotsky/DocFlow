@@ -1,0 +1,134 @@
+name: Deployment Smoke
+
+on:
+  push:
+    branches:
+      - 'DocFlow/v_*'
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'compose.yaml'
+      - '.env.example'
+      - 'src/DocFlow.Api/Program.cs'
+      - 'src/DocFlow.Api/Controllers/HealthController.cs'
+      - '.github/workflows/deployment-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate compose configuration
+        env:
+          DOCFLOW_POSTGRES_PASSWORD: docflow-smoke-password
+          DOCFLOW_API_KEY: docflow-deployment-smoke-key
+        run: docker compose -f compose.yaml config >/tmp/docflow-compose.yml
+
+      - name: Build production image
+        run: docker build -t docflow:deployment-smoke .
+
+      - name: Verify worker runtime dependencies
+        run: |
+          docker run --rm \
+            --entrypoint /bin/sh \
+            docflow:deployment-smoke \
+            -c '/opt/docflow-venv/bin/python -c "import pymupdf, pdfplumber, docflow_worker" && tesseract --version >/dev/null'
+
+      - name: Run production container smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          network=docflow-deployment-smoke
+          db=docflow-deployment-smoke-db
+          app=docflow-deployment-smoke-app
+          api_key=docflow-deployment-smoke-key
+
+          cleanup() {
+            docker logs "$app" 2>/dev/null || true
+            docker rm -f "$app" "$db" 2>/dev/null || true
+            docker network rm "$network" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          docker network create "$network"
+
+          docker run -d \
+            --name "$db" \
+            --network "$network" \
+            -e POSTGRES_DB=docflow \
+            -e POSTGRES_USER=docflow_app \
+            -e POSTGRES_PASSWORD=docflow-smoke-password \
+            postgres:16
+
+          db_ready=false
+          for _ in $(seq 1 30); do
+            if docker exec "$db" pg_isready -U docflow_app -d docflow >/dev/null 2>&1; then
+              db_ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$db_ready" != "true" ]; then
+            docker logs "$db"
+            echo "PostgreSQL did not become ready."
+            exit 1
+          fi
+
+          docker run -d \
+            --name "$app" \
+            --network "$network" \
+            -p 5080:8080 \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e 'ConnectionStrings__DocFlowDbContext=Host=docflow-deployment-smoke-db;Port=5432;Database=docflow;Username=docflow_app;Password=docflow-smoke-password' \
+            -e Authentication__ApiKey__Clients__0__Name=deployment-smoke \
+            -e Authentication__ApiKey__Clients__0__CustomerId=11111111-1111-1111-1111-111111111111 \
+            -e Authentication__ApiKey__Clients__0__ApiKey="$api_key" \
+            -e Database__ApplyMigrationsOnStartup=true \
+            docflow:deployment-smoke
+
+          app_ready=false
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:5080/health/ready >/tmp/docflow-ready.json 2>/dev/null; then
+              app_ready=true
+              break
+            fi
+            if ! docker inspect -f '{{.State.Running}}' "$app" 2>/dev/null | grep -q true; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$app_ready" != "true" ]; then
+            docker logs "$app"
+            echo "DocFlow did not become ready."
+            exit 1
+          fi
+
+          jq -e '.status == "Healthy"' /tmp/docflow-ready.json >/dev/null
+          curl -fsS http://127.0.0.1:5080/health/live \
+            | jq -e '.status == "Healthy"' >/dev/null
+
+          unauthorized_status=$(curl -sS -o /tmp/docflow-unauthorized.txt -w '%{http_code}' \
+            'http://127.0.0.1:5080/api/documents?page=1&pageSize=10')
+          test "$unauthorized_status" = "401"
+
+          curl -fsS \
+            -H "X-DocFlow-Api-Key: $api_key" \
+            'http://127.0.0.1:5080/api/documents?page=1&pageSize=10' \
+            | jq -e '
+                .page == 1
+                and .pageSize == 10
+                and .totalCount == 0
+                and (.items | length) == 0
+              ' >/dev/null
+
+          echo "Deployment smoke passed."

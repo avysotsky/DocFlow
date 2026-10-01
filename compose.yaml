@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: docflow
+      POSTGRES_USER: docflow_app
+      POSTGRES_PASSWORD: "${DOCFLOW_POSTGRES_PASSWORD:?Set DOCFLOW_POSTGRES_PASSWORD in .env}"
+    volumes:
+      - docflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docflow_app -d docflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DocFlowDbContext: "Host=db;Port=5432;Database=docflow;Username=docflow_app;Password=${DOCFLOW_POSTGRES_PASSWORD:?Set DOCFLOW_POSTGRES_PASSWORD in .env}"
+      Authentication__ApiKey__Clients__0__Name: "${DOCFLOW_CLIENT_NAME:-customer-a}"
+      Authentication__ApiKey__Clients__0__CustomerId: "${DOCFLOW_CUSTOMER_ID:-11111111-1111-1111-1111-111111111111}"
+      Authentication__ApiKey__Clients__0__ApiKey: "${DOCFLOW_API_KEY:?Set DOCFLOW_API_KEY in .env}"
+      Database__ApplyMigrationsOnStartup: "true"
+    ports:
+      - "${DOCFLOW_HTTP_PORT:-8080}:8080"
+    volumes:
+      - docflow-storage:/data/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 10
+
+volumes:
+  docflow-db:
+  docflow-storage:

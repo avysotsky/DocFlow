@@ -1,0 +1,17 @@
+.git
+.gitignore
+.github
+**/bin
+**/obj
+**/.venv
+**/venv
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+storage
+src/DocFlow.Api/storage
+src/DocFlow.Extraction.Worker/output/*
+benchmarks/corpus
+benchmarks/results
+*.md
+!.env.example
