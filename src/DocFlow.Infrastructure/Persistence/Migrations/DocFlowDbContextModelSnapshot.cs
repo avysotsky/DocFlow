@@ -46,6 +46,16 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<DateTimeOffset?>("LastProcessingAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastProcessingError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset?>("LastProcessingFailureAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("OriginalFileName")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -53,6 +63,9 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset?>("ProcessedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ProcessingAttempts")
+                        .HasColumnType("integer");
 
                     b.Property<long>("Size")
                         .HasColumnType("bigint");

@@ -4,6 +4,8 @@ namespace DocFlow.Domain.Entities;
 
 public sealed class Document
 {
+    public const int MaxProcessingErrorLength = 1000;
+
     public Guid Id { get; private set; }
     public Guid CustomerId { get; private set; }
     public string OriginalFileName { get; private set; } = string.Empty;
@@ -15,6 +17,10 @@ public sealed class Document
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? ProcessedAt { get; private set; }
     public DateTimeOffset? DeleteAt { get; private set; }
+    public int ProcessingAttempts { get; private set; }
+    public DateTimeOffset? LastProcessingAttemptAt { get; private set; }
+    public DateTimeOffset? LastProcessingFailureAt { get; private set; }
+    public string? LastProcessingError { get; private set; }
 
     private Document()
     {
@@ -50,7 +56,25 @@ public sealed class Document
         DeleteAt = deleteAt;
     }
 
-    public void MarkProcessing() => Status = DocumentStatus.Processing;
+    public void BeginProcessingAttempt()
+    {
+        ProcessingAttempts = checked(ProcessingAttempts + 1);
+        LastProcessingAttemptAt = DateTimeOffset.UtcNow;
+        Status = DocumentStatus.Processing;
+    }
+
+    public void RecordProcessingFailure(string errorSummary)
+    {
+        if (string.IsNullOrWhiteSpace(errorSummary))
+            throw new ArgumentException("Processing error summary is required.", nameof(errorSummary));
+
+        var normalized = errorSummary.Trim();
+        if (normalized.Length > MaxProcessingErrorLength)
+            normalized = normalized[..MaxProcessingErrorLength];
+
+        LastProcessingFailureAt = DateTimeOffset.UtcNow;
+        LastProcessingError = normalized;
+    }
 
     public void MarkProcessed(string documentType)
     {
@@ -60,6 +84,7 @@ public sealed class Document
         DocumentType = documentType.Trim();
         Status = DocumentStatus.Processed;
         ProcessedAt = DateTimeOffset.UtcNow;
+        ClearProcessingFailure();
     }
 
     public void MarkNeedsReview(string? documentType = null)
@@ -69,7 +94,14 @@ public sealed class Document
 
         Status = DocumentStatus.NeedsReview;
         ProcessedAt = DateTimeOffset.UtcNow;
+        ClearProcessingFailure();
     }
 
     public void MarkFailed() => Status = DocumentStatus.Failed;
+
+    private void ClearProcessingFailure()
+    {
+        LastProcessingFailureAt = null;
+        LastProcessingError = null;
+    }
 }

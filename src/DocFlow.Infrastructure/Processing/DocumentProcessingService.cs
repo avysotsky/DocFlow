@@ -36,7 +36,7 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
         if (alreadyProcessed)
             return;
 
-        document.MarkProcessing();
+        document.BeginProcessingAttempt();
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         try
@@ -66,14 +66,40 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
         {
             throw;
         }
-        catch
+        catch (Exception exception)
         {
-            await TryMarkFailedAsync(documentId);
+            await TryRecordFailureAsync(
+                documentId,
+                CreateFailureSummary(exception));
             throw;
         }
     }
 
-    private async Task TryMarkFailedAsync(Guid documentId)
+    public async Task MarkFailedAsync(
+        Guid documentId,
+        CancellationToken cancellationToken = default)
+    {
+        _dbContext.ChangeTracker.Clear();
+
+        var document = await _dbContext.Documents
+            .SingleOrDefaultAsync(x => x.Id == documentId, cancellationToken);
+
+        if (document is null)
+            return;
+
+        var alreadyProcessed = await _dbContext.ExtractionResults
+            .AnyAsync(x => x.DocumentId == documentId, cancellationToken);
+
+        if (alreadyProcessed)
+            return;
+
+        document.MarkFailed();
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task TryRecordFailureAsync(
+        Guid documentId,
+        string failureSummary)
     {
         try
         {
@@ -85,12 +111,27 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
             if (document is null)
                 return;
 
-            document.MarkFailed();
+            document.RecordProcessingFailure(failureSummary);
             await _dbContext.SaveChangesAsync(CancellationToken.None);
         }
         catch
         {
             // Preserve the original processing exception.
         }
+    }
+
+    private static string CreateFailureSummary(Exception exception)
+    {
+        var message = exception switch
+        {
+            FileNotFoundException => "Required document file was not found.",
+            DirectoryNotFoundException => "Required processing path was not found.",
+            UnauthorizedAccessException => "Document processing could not access a required resource.",
+            IOException => "Document processing could not read or write a required resource.",
+            TimeoutException => "Document processing timed out.",
+            _ => "Document extraction failed."
+        };
+
+        return $"{exception.GetType().Name}: {message}";
     }
 }

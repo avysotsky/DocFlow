@@ -38,6 +38,12 @@ public sealed class DocumentConfiguration : IEntityTypeConfiguration<Document>
         builder.Property(x => x.CreatedAt)
             .IsRequired();
 
+        builder.Property(x => x.ProcessingAttempts)
+            .IsRequired();
+
+        builder.Property(x => x.LastProcessingError)
+            .HasMaxLength(Document.MaxProcessingErrorLength);
+
         builder.HasIndex(x => x.StorageKey)
             .IsUnique();
 

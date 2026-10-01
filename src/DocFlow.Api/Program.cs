@@ -38,6 +38,17 @@ if (!builder.Environment.IsDevelopment())
 }
 
 builder.Services
+    .AddOptions<DocumentProcessingRetryOptions>()
+    .Bind(builder.Configuration.GetSection(DocumentProcessingRetryOptions.ConfigurationSection))
+    .Validate(
+        options => options.MaxAttempts is >= 1 and <= 10,
+        "Processing retry MaxAttempts must be between 1 and 10.")
+    .Validate(
+        options => options.RetryDelayMilliseconds is >= 0 and <= 60000,
+        "Processing retry RetryDelayMilliseconds must be between 0 and 60000.")
+    .ValidateOnStart();
+
+builder.Services
     .AddAuthentication(ApiKeyAuthenticationDefaults.Scheme)
     .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
         ApiKeyAuthenticationDefaults.Scheme,

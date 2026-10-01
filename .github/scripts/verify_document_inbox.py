@@ -45,6 +45,17 @@ def get_inbox(
     return request_json(url, api_key)
 
 
+def get_processing_diagnostics(
+    base_url: str,
+    api_key: str,
+    document_id: str,
+) -> tuple[int, object | None]:
+    url = (
+        f"{base_url.rstrip('/')}/api/documents/{document_id}/processing-diagnostics"
+    )
+    return request_json(url, api_key)
+
+
 def assert_in_descending_created_order(items: list[dict[str, object]]) -> None:
     created = [str(item["createdAt"]) for item in items]
     assert created == sorted(created, reverse=True), created
@@ -100,11 +111,44 @@ def main() -> None:
     assert float(invoice["confidence"]) == 1.0, invoice
     assert "storageKey" not in invoice, invoice
 
+    status, invoice_diagnostics = get_processing_diagnostics(
+        args.base_url,
+        args.api_key,
+        args.invoice_document_id,
+    )
+    assert status == 200 and isinstance(invoice_diagnostics, dict), (
+        status,
+        invoice_diagnostics,
+    )
+    assert invoice_diagnostics["status"] == "Processed", invoice_diagnostics
+    assert invoice_diagnostics["processingAttempts"] == 1, invoice_diagnostics
+    assert invoice_diagnostics["lastProcessingAttemptAt"], invoice_diagnostics
+    assert invoice_diagnostics["lastProcessingFailureAt"] is None, invoice_diagnostics
+    assert invoice_diagnostics["lastProcessingError"] is None, invoice_diagnostics
+
     failed = next(item for item in items if item["id"] == args.failed_document_id)
     assert failed["documentStatus"] == "Failed", failed
     assert failed["extractionResultId"] is None, failed
     assert failed["validationStatus"] is None, failed
     assert failed["confidence"] is None, failed
+
+    status, failed_diagnostics = get_processing_diagnostics(
+        args.base_url,
+        args.api_key,
+        args.failed_document_id,
+    )
+    assert status == 200 and isinstance(failed_diagnostics, dict), (
+        status,
+        failed_diagnostics,
+    )
+    assert failed_diagnostics["status"] == "Failed", failed_diagnostics
+    assert failed_diagnostics["processingAttempts"] == 3, failed_diagnostics
+    assert failed_diagnostics["lastProcessingAttemptAt"], failed_diagnostics
+    assert failed_diagnostics["lastProcessingFailureAt"], failed_diagnostics
+    assert (
+        failed_diagnostics["lastProcessingError"]
+        == "InvalidOperationException: Document extraction failed."
+    ), failed_diagnostics
 
     status, review = get_inbox(
         args.base_url,
@@ -165,6 +209,13 @@ def main() -> None:
     status, _ = request_json(other_url, args.api_key)
     assert status == 404, status
 
+    status, _ = get_processing_diagnostics(
+        args.base_url,
+        args.api_key,
+        args.other_document_id,
+    )
+    assert status == 404, status
+
     status, other_document = request_json(other_url, args.other_api_key)
     assert status == 200 and isinstance(other_document, dict), (status, other_document)
     assert other_document["id"] == args.other_document_id, other_document
@@ -192,7 +243,8 @@ def main() -> None:
 
     print(
         "Document inbox/auth E2E passed: 401 authentication, claim-derived tenant scope, "
-        "cross-tenant 404 isolation, filters, extraction summary and pagination verified."
+        "cross-tenant 404 isolation, bounded processing retries/diagnostics, filters, "
+        "extraction summary and pagination verified."
     )
 
 
