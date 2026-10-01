@@ -19,6 +19,7 @@ Authenticated customer API
   -> PostgreSQL persistence
   -> tenant-scoped inbox / human review
   -> CSV/XLSX export
+  -> explicit terminal document deletion
 ```
 
 Measured public-reference baseline:
@@ -109,6 +110,24 @@ Completed `Processed`/`NeedsReview` documents are not re-enqueued, and `Failed` 
 
 This recovery contract is intentionally scoped to the current **single-instance MVP**. It is not a distributed queue, lease or multi-worker coordination mechanism. If DocFlow later runs multiple active application instances, introduce explicit distributed ownership/queue semantics rather than relying on startup reconciliation alone.
 
+## Document deletion and lifecycle
+
+Tenant-scoped explicit deletion is available through:
+
+```text
+DELETE /api/documents/{id}
+```
+
+Deletion is allowed for terminal `Processed`, `NeedsReview`, and `Failed` documents. `Uploaded` and `Processing` return `409 Conflict` so the API does not remove a file while the current background worker may own it.
+
+The deletion service locks the document row with PostgreSQL `FOR UPDATE`, removes the database row inside a transaction, deletes the stored PDF, and then commits. Existing foreign-key cascades remove the associated `ExtractionResult` and `DocumentReview` records.
+
+Cross-tenant ids return `404`. After successful deletion all normal document, diagnostics, extraction, review and export access returns `404`.
+
+Local filesystem and PostgreSQL do not form a distributed transaction. A storage failure rolls the database transaction back; a rare database commit failure after successful file deletion remains a residual cross-resource consistency risk.
+
+`Document.DeleteAt` still exists as retention metadata but automatic scheduled retention is not implemented yet.
+
 ## Production deployment
 
 The repository includes a production `Dockerfile` and `compose.yaml`.
@@ -150,15 +169,16 @@ GET /health/ready
 Current customer document flow includes:
 
 ```text
-POST /api/documents
-GET  /api/documents?status=...&documentType=...&page=1&pageSize=50
-POST /api/documents/{id}/process
-GET  /api/documents/{id}
-GET  /api/documents/{id}/processing-diagnostics
-GET  /api/documents/{id}/extraction-result
-PUT  /api/documents/{id}/review
-GET  /api/documents/{id}/export?format=csv
-GET  /api/documents/{id}/export?format=xlsx
+POST   /api/documents
+GET    /api/documents?status=...&documentType=...&page=1&pageSize=50
+POST   /api/documents/{id}/process
+GET    /api/documents/{id}
+GET    /api/documents/{id}/processing-diagnostics
+GET    /api/documents/{id}/extraction-result
+PUT    /api/documents/{id}/review
+GET    /api/documents/{id}/export?format=csv
+GET    /api/documents/{id}/export?format=xlsx
+DELETE /api/documents/{id}
 ```
 
 Export uses the already persisted effective extraction result and does not rerun OCR or extraction.
@@ -177,10 +197,10 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated HTTP endpoints, processing diagnostics, startup recovery, health probes and background-service host.
-- **DocFlow.Application** — processing/export/review abstractions and orchestration contracts.
+- **DocFlow.Api** — authenticated HTTP endpoints, lifecycle/delete, processing diagnostics, startup recovery, health probes and background-service host.
+- **DocFlow.Application** — processing/export/review/deletion abstractions and orchestration contracts.
 - **DocFlow.Domain** — document, extraction-result and review entities/enums.
-- **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review and export implementation.
+- **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review/deletion and export implementation.
 - **DocFlow.Extraction.Worker** — Python PDF/OCR parsing, deterministic semantic extraction, validation and benchmark tooling.
 
 ## Export
@@ -205,8 +225,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, and single-instance restart recovery from PostgreSQL.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, and tenant-scoped terminal document deletion with file/database cleanup.
 
-The next product gap should be selected from customer data lifecycle/retention and reviewer audit identity. Retention/delete is the narrower next candidate because document storage currently has no customer-visible lifecycle operation even though the domain already carries deletion metadata.
+A strong next narrow product gap is authenticated access to the original stored PDF. Human review exists, but the API currently exposes metadata/structured data without a tenant-scoped file-download endpoint, so a reviewer cannot retrieve the source document through the API itself.
 
 Production code remains private. A separate public portfolio repository may be created later.

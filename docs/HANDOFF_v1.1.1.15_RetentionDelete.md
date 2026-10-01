@@ -1,56 +1,196 @@
 # DocFlow — handoff v1.1.1.15 Retention / Delete
 
-Status: **ACTIVE**  
+Status: **COMPLETED**  
 Repository: `avysotsky/DocFlow`  
 Branch: `DocFlow/v_1.1.1.15_RetentionDelete`  
 Base: `DocFlow/v_1.1.1.14_RestartRecovery`
 
-## Why this milestone exists
+## 1. Milestone result
 
-DocFlow persists uploaded PDF files plus document/extraction/review records, but customers currently have no explicit lifecycle operation to remove a document. `Document.DeleteAt` exists in the domain but is not used by the current flow.
+`v1.1.1.15` adds tenant-scoped explicit deletion for terminal documents, including stored-file cleanup and database cascade cleanup, without adding scheduled retention or new queue infrastructure.
 
-## Scope
-
-Keep `v1.1.1.15` narrow:
-
-1. Add tenant-scoped explicit document deletion.
-2. Allow deletion only for terminal `Processed`, `NeedsReview`, and `Failed` documents.
-3. Reject `Uploaded` and `Processing` deletion with `409 Conflict` to avoid races with the current in-memory worker/queue.
-4. Remove the stored PDF and the `Document` record; rely on existing EF/PostgreSQL cascade delete for `ExtractionResult` and `DocumentReview`.
-5. Cross-tenant ids remain `404`.
-6. After successful deletion the resource remains invisible (`404` on subsequent reads/actions).
-7. Extend Automation E2E to prove database/file cleanup and active-document conflict behavior.
-
-## Consistency model
-
-Deletion is limited to terminal documents, so the processing worker does not own them.
-
-For the local filesystem + PostgreSQL pair, there is no distributed transaction. The implementation will use a database transaction around the row delete and perform file deletion before committing the database transaction. If storage deletion fails, the database transaction is rolled back. A database commit failure after successful file deletion remains a rare residual consistency risk and must not be represented as a fully atomic cross-resource transaction.
-
-## Non-goals
-
-Do not add in this milestone:
-
-- automatic scheduled retention;
-- soft-delete/tombstone state;
-- background storage garbage collection;
-- cancellation of queued/processing jobs;
-- distributed locking;
-- batch delete;
-- reviewer identity;
-- extraction/OCR changes.
-
-## Acceptance criteria
+Main implementation commit:
 
 ```text
-DELETE /api/documents/{id} is tenant-scoped
-Processed/NeedsReview/Failed can be deleted
-Uploaded/Processing -> 409
-cross-tenant id -> 404
-document row disappears
-related ExtractionResult/DocumentReview rows disappear by cascade
-stored PDF disappears
-subsequent GET/export/review/diagnostics for deleted id -> 404
-existing processing/restart/retry flows remain green
-.NET CI and Automation E2E remain green
+1fae49251a9950e5d45d8feb4d5bad25c86e062c
+Add tenant-scoped terminal document deletion
 ```
+
+Validation:
+
+```text
+.NET CI #28
+run id: 36874261923
+result: success
+
+Automation E2E #104
+run id: 36874261696
+result: success
+```
+
+Only these two relevant workflows ran. Deployment Smoke, Scanned OCR E2E and Public Reference Benchmark were not triggered.
+
+## 2. Delete API
+
+New route:
+
+```text
+DELETE /api/documents/{documentId}
+```
+
+Authentication and tenant rules are unchanged:
+
+```text
+missing/invalid API key -> 401
+cross-tenant or absent document -> 404
+```
+
+Deletion outcomes:
+
+```text
+Processed   -> 204 No Content
+NeedsReview -> 204 No Content
+Failed      -> 204 No Content
+Uploaded    -> 409 Conflict
+Processing  -> 409 Conflict
+```
+
+`Uploaded` and `Processing` are deliberately rejected because the single-instance background worker/queue may still own those documents.
+
+## 3. Concurrency/race handling
+
+`DocumentDeletionService` begins a PostgreSQL transaction and reads the owned document using:
+
+```sql
+SELECT ... FOR UPDATE
+```
+
+The row lock serializes the terminal-state decision against processing state changes.
+
+Important race behavior:
+
+- if processing has already changed the row to `Processing`, delete observes that state and returns `409`;
+- if delete locks/removes the row first, a queued worker later sees the document as absent and treats that as a successful no-op;
+- a queued id for a legitimately deleted document therefore does not generate repeated technical-failure retries.
+
+`DocumentProcessingService.ProcessAsync` was adjusted so a missing document is a no-op, and an extraction save that loses a race to explicit deletion is also treated as authoritative deletion rather than an attempt to recreate/fail the resource.
+
+## 4. File/database cleanup
+
+The deletion transaction performs:
+
+```text
+lock owned terminal Document
+-> delete Document row (uncommitted)
+-> delete stored PDF
+-> commit PostgreSQL transaction
+```
+
+Existing cascade relationships remove:
+
+```text
+ExtractionResult
+DocumentReview
+```
+
+If file deletion fails, the database transaction is rolled back.
+
+There is no distributed transaction between the local filesystem and PostgreSQL. A rare database commit failure after the file was successfully deleted remains a residual consistency risk. Do not describe this as fully atomic cross-resource deletion.
+
+## 5. E2E proof
+
+The existing restart-recovery script was extended instead of creating another workflow.
+
+Automation E2E proves:
+
+```text
+cross-tenant DELETE -> 404
+Uploaded DELETE -> 409
+Processing DELETE -> 409
+active conflict rows remain in database
+Processed DELETE -> 204
+Failed DELETE -> 204
+stored PDF is physically removed
+Document row is removed
+ExtractionResult row is removed by cascade
+DocumentReview row is removed by cascade
+GET deleted document -> 404
+GET deleted diagnostics -> 404
+GET deleted extraction result -> 404
+GET deleted export -> 404
+PUT review after delete -> 404
+repeated DELETE -> 404
+restart recovery remains green
+all previous automation scenarios remain green
+```
+
+A synthetic `DocumentReview` is attached to the recovery document before deletion so the database cascade is explicitly tested, not merely inferred from EF configuration.
+
+## 6. DeleteAt / retention state
+
+`Document.DeleteAt` already exists but remains unused by the product flow.
+
+This milestone intentionally implements **explicit customer deletion only**. It does not add:
+
+- automatic scheduled retention;
+- background retention sweeps;
+- soft-delete/tombstone state;
+- storage garbage collection.
+
+Those can be added later if there is a concrete retention requirement.
+
+## 7. CI discipline
+
+The narrowed CI filters continue to work correctly.
+
+This implementation triggered only:
+
+```text
+.NET CI #28
+Automation E2E #104
+```
+
+No extraction/OCR behavior changed.
+
+Public-reference baseline remains:
+
+```text
+17/17 public documents passed
+98/98 checked business fields matched
+17/17 document types correct
+17/17 validation statuses correct
+```
+
+## 8. Current product state
+
+The coherent single-instance MVP now includes:
+
+```text
+API-key tenant auth
+PDF upload
+restart reconciliation
+bounded retries + persisted failure diagnostics
+digital PDF / conditional OCR
+quotation/invoice detection + deterministic extraction
+validation + PostgreSQL persistence
+review inbox + human correction
+CSV/XLSX export
+explicit terminal document deletion
+container deployment + health/readiness
+```
+
+## 9. Recommended next gap
+
+A stronger next narrow product gap than reviewer identity is **authenticated original-PDF access**.
+
+Human review already exists, but there is no customer endpoint that streams the stored source PDF. `IFileStorage.OpenReadAsync` exists internally, and `GET /api/documents/{id}` currently exposes only metadata/storage key.
+
+A likely `v1.1.1.16` should inspect and add a tenant-scoped source-document endpoint, for example:
+
+```text
+GET /api/documents/{id}/file
+```
+
+with correct content type, download filename, tenant isolation and `404` behavior. It should not expose filesystem/storage paths directly.
+
+Reviewer/audit identity remains a later candidate. Current API-key client identity is a tenant/integration identity and must not be mislabeled as an individual human reviewer.
