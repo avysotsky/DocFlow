@@ -7,6 +7,7 @@ on:
       - 'DocFlow/v_1.1.1.5_RealCorpus'
       - 'DocFlow/v_1.1.1.6_HardCases'
       - 'DocFlow/v_1.1.1.6_HardCases_2'
+      - 'DocFlow/v_1.1.1.6_HardCases_3'
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
       - '.github/scripts/add_breadth_public_reference.py'
@@ -35,7 +36,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
           cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
 
       - name: Install Tesseract OCR
