@@ -1,5 +1,5 @@
 name: Public Reference Benchmark
-# Validation batch: HardCases corpus breadth + retained GST/French paths
+# Validation batch: wrapped item rows + settlement-total priority
 
 on:
   push:
