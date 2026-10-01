@@ -22,6 +22,39 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.BatchIntakeIdempotencyRecord", b =>
+                {
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GenerationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ResponseJson")
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("CustomerId", "Key");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("BatchIntakeIdempotencyRecords", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.Document", b =>
                 {
                     b.Property<Guid>("Id")

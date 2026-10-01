@@ -14,6 +14,7 @@ public sealed class DocFlowDbContext : DbContext
     public DbSet<ExtractionResult> ExtractionResults => Set<ExtractionResult>();
     public DbSet<DocumentReview> DocumentReviews => Set<DocumentReview>();
     public DbSet<IntakeIdempotencyRecord> IntakeIdempotencyRecords => Set<IntakeIdempotencyRecord>();
+    public DbSet<BatchIntakeIdempotencyRecord> BatchIntakeIdempotencyRecords => Set<BatchIntakeIdempotencyRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

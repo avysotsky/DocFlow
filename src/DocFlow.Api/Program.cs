@@ -109,6 +109,7 @@ builder.Services.AddDbContext<DocFlowDbContext>(options =>
 
 builder.Services.AddSingleton<OperationalMetrics>();
 builder.Services.AddScoped<DocumentIntakeService>();
+builder.Services.AddScoped<DocumentBatchIntakeService>();
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
 builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExportService>();
 builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();

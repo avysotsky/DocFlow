@@ -78,43 +78,40 @@ public sealed class DocumentIntakeService
         if (idempotencyKey is null)
             return await IntakeWithoutIdempotencyAsync(customerId, file, cancellationToken);
 
-        var normalizedKey = idempotencyKey.Trim();
-        if (normalizedKey.Length == 0)
-        {
-            return new DocumentIntakeResult(
-                DocumentIntakeOutcome.Rejected,
-                file?.FileName ?? string.Empty,
-                Error: "Idempotency-Key must not be empty.");
-        }
-
-        if (normalizedKey.Length > IntakeIdempotencyRecord.MaxKeyLength)
-        {
-            return new DocumentIntakeResult(
-                DocumentIntakeOutcome.Rejected,
-                file?.FileName ?? string.Empty,
-                Error: $"Idempotency-Key must not exceed {IntakeIdempotencyRecord.MaxKeyLength} characters.");
-        }
-
-        if (normalizedKey.Any(char.IsControl))
-        {
-            return new DocumentIntakeResult(
-                DocumentIntakeOutcome.Rejected,
-                file?.FileName ?? string.Empty,
-                Error: "Idempotency-Key must not contain control characters.");
-        }
-
         var fingerprint = await ComputeRequestFingerprintAsync(file, cancellationToken);
         var result = await IntakeWithIdempotencyAsync(
             customerId,
             file,
-            normalizedKey,
+            idempotencyKey,
             fingerprint,
             cancellationToken);
 
         if (result.IsReplay && _httpContextAccessor.HttpContext is { } httpContext)
-            httpContext.Response.Headers["Idempotency-Replayed"] = "true";
+            httpContext.Response.Headers[IntakeIdempotencyKey.ReplayHeaderName] = "true";
 
         return result;
+    }
+
+    public async Task<DocumentIntakeResult> IntakeWithInternalIdempotencyKeyAsync(
+        Guid customerId,
+        IFormFile? file,
+        string internalKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (customerId == Guid.Empty)
+            throw new ArgumentException("Customer id is required.", nameof(customerId));
+        if (!IntakeIdempotencyKey.IsInternal(internalKey))
+            throw new ArgumentException("An internal idempotency key is required.", nameof(internalKey));
+        if (internalKey.Length > IntakeIdempotencyRecord.MaxKeyLength)
+            throw new ArgumentOutOfRangeException(nameof(internalKey));
+
+        var fingerprint = await ComputeRequestFingerprintAsync(file, cancellationToken);
+        return await IntakeWithIdempotencyAsync(
+            customerId,
+            file,
+            internalKey,
+            fingerprint,
+            cancellationToken);
     }
 
     private async Task<DocumentIntakeResult> IntakeWithoutIdempotencyAsync(
@@ -203,7 +200,7 @@ public sealed class DocumentIntakeService
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        var lockScope = $"{customerId:N}:{key}";
+        var lockScope = IntakeIdempotencyKey.CreateSingleLockScope(customerId, key);
         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({lockScope}, 0));",
             cancellationToken);
@@ -237,10 +234,11 @@ public sealed class DocumentIntakeService
                 DocumentIntakeOutcome.Rejected,
                 file?.FileName ?? string.Empty,
                 Error: validationError);
+            IntakeIdempotencyRecord? persistedRejectedRecord = null;
 
             try
             {
-                var record = UpsertIdempotencyRecord(
+                persistedRejectedRecord = UpsertIdempotencyRecord(
                     existing,
                     customerId,
                     key,
@@ -253,12 +251,14 @@ public sealed class DocumentIntakeService
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                if (persistedRejectedRecord is not null)
+                    _dbContext.Entry(persistedRejectedRecord).State = EntityState.Detached;
                 throw;
             }
             catch (Exception exception)
             {
-                if (existing is not null)
-                    _dbContext.Entry(existing).State = EntityState.Detached;
+                if (persistedRejectedRecord is not null)
+                    _dbContext.Entry(persistedRejectedRecord).State = EntityState.Detached;
 
                 _logger.LogError(
                     exception,
@@ -469,14 +469,8 @@ public sealed class DocumentIntakeService
             return (null, null);
         }
 
-        var values = context.Request.Headers["Idempotency-Key"];
-        if (values.Count == 0)
-            return (null, null);
-
-        if (values.Count != 1)
-            return (null, "Exactly one Idempotency-Key header value is allowed.");
-
-        return (values[0], null);
+        return IntakeIdempotencyKey.NormalizeExternal(
+            context.Request.Headers[IntakeIdempotencyKey.HeaderName]);
     }
 
     private static bool IsSingleUploadPath(PathString path)

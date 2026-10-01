@@ -26,17 +26,20 @@ public sealed class DocumentsController : ControllerBase
     private readonly IExtractionResultService _extractionResultService;
     private readonly IDocumentProcessingQueue _documentProcessingQueue;
     private readonly DocumentIntakeService _documentIntakeService;
+    private readonly DocumentBatchIntakeService _documentBatchIntakeService;
 
     public DocumentsController(
         DocFlowDbContext dbContext,
         IExtractionResultService extractionResultService,
         IDocumentProcessingQueue documentProcessingQueue,
-        DocumentIntakeService documentIntakeService)
+        DocumentIntakeService documentIntakeService,
+        DocumentBatchIntakeService documentBatchIntakeService)
     {
         _dbContext = dbContext;
         _extractionResultService = extractionResultService;
         _documentProcessingQueue = documentProcessingQueue;
         _documentIntakeService = documentIntakeService;
+        _documentBatchIntakeService = documentBatchIntakeService;
     }
 
     [HttpGet]
@@ -368,6 +371,7 @@ public sealed class DocumentsController : ControllerBase
     [ProducesResponseType(typeof(BatchUploadDocumentsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BatchUploadDocumentsResponse>> UploadBatch(
         [FromForm] BatchUploadDocumentsRequest request,
         CancellationToken cancellationToken)
@@ -387,51 +391,37 @@ public sealed class DocumentsController : ControllerBase
             aggregateSize += file.Length;
         }
 
-        var customerId = User.GetRequiredCustomerId();
-        var items = new List<BatchUploadDocumentItemResponse>(request.Files.Count);
-        var accepted = 0;
-        var rejected = 0;
-        var failed = 0;
+        var (idempotencyKey, keyError) = IntakeIdempotencyKey.NormalizeExternal(
+            Request.Headers[IntakeIdempotencyKey.HeaderName]);
+        if (keyError is not null)
+            return BadRequest(keyError);
 
-        for (var index = 0; index < request.Files.Count; index++)
-        {
-            var result = await _documentIntakeService.IntakeAsync(
-                customerId,
-                request.Files[index],
-                cancellationToken);
+        var result = await _documentBatchIntakeService.IntakeAsync(
+            User.GetRequiredCustomerId(),
+            request.Files,
+            idempotencyKey,
+            cancellationToken);
 
-            switch (result.Outcome)
-            {
-                case DocumentIntakeOutcome.Accepted:
-                    accepted++;
-                    break;
-                case DocumentIntakeOutcome.Rejected:
-                    rejected++;
-                    break;
-                case DocumentIntakeOutcome.Failed:
-                    failed++;
-                    break;
-                default:
-                    throw new InvalidOperationException(
-                        $"Unsupported document intake outcome '{result.Outcome}'.");
-            }
+        if (result.IsReplay)
+            Response.Headers[IntakeIdempotencyKey.ReplayHeaderName] = "true";
 
-            items.Add(new BatchUploadDocumentItemResponse(
-                index,
-                result.OriginalFileName,
-                result.Outcome.ToString(),
-                result.DocumentId,
-                result.DocumentStatus,
-                result.CreatedAt,
-                result.DeleteAt,
-                result.Error));
-        }
+        var items = result.Items
+            .Select(item => new BatchUploadDocumentItemResponse(
+                item.Index,
+                item.OriginalFileName,
+                item.Outcome,
+                item.DocumentId,
+                item.DocumentStatus,
+                item.CreatedAt,
+                item.DeleteAt,
+                item.Error))
+            .ToArray();
 
         return Ok(new BatchUploadDocumentsResponse(
-            request.Files.Count,
-            accepted,
-            rejected,
-            failed,
+            result.TotalCount,
+            result.AcceptedCount,
+            result.RejectedCount,
+            result.FailedCount,
             items));
     }
 

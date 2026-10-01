@@ -13,6 +13,7 @@ on:
       - 'src/DocFlow.Extraction.Worker/**'
       - '.github/scripts/generate_supplier_quotation_pdf.py'
       - '.github/scripts/generate_supplier_invoice_pdf.py'
+      - '.github/scripts/verify_batch_idempotency.py'
       - '.github/scripts/verify_document_export.py'
       - '.github/scripts/verify_document_inbox.py'
       - '.github/scripts/verify_document_review.py'
@@ -134,14 +135,20 @@ jobs:
           other_api_key='docflow-e2e-other-key'
           auth_header=(-H "X-DocFlow-Api-Key: $api_key")
 
-          echo "Scenario 0: expired intake idempotency records are cleaned in bounded sweeps"
+          echo "Scenario 0: expired intake idempotency records and batch manifests are cleaned in bounded sweeps"
           docker run --rm --network host \
             -e PGPASSWORD=postgres \
             postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
             "INSERT INTO \"IntakeIdempotencyRecords\" (\"CustomerId\", \"Key\", \"RequestFingerprint\", \"Outcome\", \"OriginalFileName\", \"CreatedAt\", \"ExpiresAt\") VALUES ('$customer_id', 'cleanup-expired-1', repeat('a', 64), 'Rejected', 'cleanup-expired-1.pdf', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'), ('$customer_id', 'cleanup-expired-2', repeat('b', 64), 'Rejected', 'cleanup-expired-2.pdf', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'), ('$customer_id', 'cleanup-unexpired', repeat('c', 64), 'Rejected', 'cleanup-unexpired.pdf', NOW(), NOW() + INTERVAL '1 hour');"
 
-          sleep 4
+          docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO \"BatchIntakeIdempotencyRecords\" (\"CustomerId\", \"Key\", \"RequestFingerprint\", \"GenerationId\", \"CreatedAt\", \"ExpiresAt\") VALUES ('$customer_id', 'batch-cleanup-expired-1', repeat('d', 64), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'), ('$customer_id', 'batch-cleanup-expired-2', repeat('e', 64), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour'), ('$customer_id', 'batch-cleanup-unexpired', repeat('f', 64), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', NOW(), NOW() + INTERVAL '1 hour');"
+
+          sleep 5
 
           cleanup_counts=$(docker run --rm --network host \
             -e PGPASSWORD=postgres \
@@ -149,6 +156,13 @@ jobs:
             psql -h 127.0.0.1 -U postgres -d docflow -At -c \
             "SELECT COUNT(*) FILTER (WHERE \"Key\" LIKE 'cleanup-expired-%'), COUNT(*) FILTER (WHERE \"Key\" = 'cleanup-unexpired') FROM \"IntakeIdempotencyRecords\";")
           test "$cleanup_counts" = "0|1"
+
+          batch_cleanup_counts=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+            "SELECT COUNT(*) FILTER (WHERE \"Key\" LIKE 'batch-cleanup-expired-%'), COUNT(*) FILTER (WHERE \"Key\" = 'batch-cleanup-unexpired') FROM \"BatchIntakeIdempotencyRecords\";")
+          test "$batch_cleanup_counts" = "0|1"
 
           wait_for_terminal_status() {
             local document_id="$1"
@@ -371,6 +385,12 @@ jobs:
             --invoice-document-id "$invoice_document_id" \
             --failed-document-id "$failed_document_id" \
             --needs-review-document-id "$invalid_document_id"
+
+          echo "Scenario 8b: batch intake idempotency is tenant-scoped and concurrency-safe"
+          python .github/scripts/verify_batch_idempotency.py \
+            --base-url http://127.0.0.1:5080 \
+            --api-key "$api_key" \
+            --other-api-key "$other_api_key"
 
           echo "Scenario 9: NeedsReview document can be human-reviewed and exported"
           python .github/scripts/verify_document_review.py \
