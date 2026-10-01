@@ -8,16 +8,9 @@ def detect_document_type(content: DocumentContent) -> str:
     """Detect the supported supplier document type using deterministic text markers."""
     text = content.text.lower()
 
-    # A proforma invoice is still an invoice-class supplier document in DocFlow's
-    # current two-type model. Treat the explicit title as a strong deterministic
-    # marker before scoring the more generic invoice/quotation metadata labels.
     if "proforma invoice" in text or "pro-forma invoice" in text:
         return "supplier_invoice"
 
-    # German supplier invoices use a different vocabulary but retain strong,
-    # deterministic business labels. Require at least two invoice-specific markers
-    # together with the document title so prose mentioning a Rechnung does not become
-    # a false positive.
     german_invoice_markers = (
         "rechnungsnummer",
         "rechnungsdatum",
@@ -26,6 +19,18 @@ def detect_document_type(content: DocumentContent) -> str:
     )
     german_invoice_score = sum(marker in text for marker in german_invoice_markers)
     if german_invoice_score >= 2 and "rechnung" in text:
+        return "supplier_invoice"
+
+    french_invoice_markers = (
+        "total ht",
+        "total tva",
+        "total ttc",
+        "date d'échéance",
+        "net a payer",
+        "net à payer",
+    )
+    french_invoice_score = sum(marker in text for marker in french_invoice_markers)
+    if french_invoice_score >= 2 and "facture" in text:
         return "supplier_invoice"
 
     quotation_markers = (
@@ -40,10 +45,10 @@ def detect_document_type(content: DocumentContent) -> str:
     invoice_markers = (
         "invoice no",
         "invoice number",
-        "invoice #",
         "invoice date",
         "due date",
         "payment due",
+        "invoice #:",
     )
 
     quotation_score = sum(marker in text for marker in quotation_markers)

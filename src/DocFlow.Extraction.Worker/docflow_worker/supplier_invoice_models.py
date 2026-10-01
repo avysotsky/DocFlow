@@ -14,6 +14,13 @@ class SupplierInvoiceItem(BaseModel):
     line_total: Decimal | None = None
 
 
+class SupplierInvoiceTaxBreakdown(BaseModel):
+    category_code: str | None = None
+    rate: Decimal
+    taxable_amount: Decimal
+    tax_amount: Decimal | None = None
+
+
 class SupplierInvoiceData(BaseModel):
     supplier_name: str | None = None
     invoice_number: str | None = None
@@ -24,10 +31,10 @@ class SupplierInvoiceData(BaseModel):
     purchase_order_number: str | None = None
     items: list[SupplierInvoiceItem] = Field(default_factory=list)
     discount_amount: Decimal | None = None
-    tax_inclusive: bool = False
     subtotal: Decimal | None = None
     vat_rate: Decimal | None = None
     vat_amount: Decimal | None = None
+    tax_breakdown: list[SupplierInvoiceTaxBreakdown] = Field(default_factory=list)
     total: Decimal | None = None
     payment_terms: str | None = None
     notes: str | None = None

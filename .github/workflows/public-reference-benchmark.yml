@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
       - '.github/scripts/add_multipage_public_reference.py'
+      - '.github/scripts/add_french_multivat_public_reference.py'
       - '.github/scripts/correct_public_reference_selection.py'
       - '.github/scripts/annotate_public_reference_validation.py'
       - '.github/scripts/dump_public_reference_text.py'
@@ -61,6 +62,9 @@ jobs:
           python .github/scripts/add_multipage_public_reference.py \
             --root /tmp/docflow-public-reference
 
+          python .github/scripts/add_french_multivat_public_reference.py \
+            --root /tmp/docflow-public-reference
+
           python .github/scripts/correct_public_reference_selection.py \
             --root /tmp/docflow-public-reference
 
@@ -89,7 +93,8 @@ jobs:
           for required in \
             phoenix-petroleum-invoice-472557 \
             cargo-international-invoice-g59771 \
-            casterton-foodworks-invoice-02706
+            casterton-foodworks-invoice-02706 \
+            facturalex-french-multivat-f20260023
           do
             if ! jq -e --arg id "$required" '.documents[] | select(.id == $id)' \
               /tmp/docflow-public-reference/manifest.json > /dev/null; then
