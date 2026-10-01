@@ -1,5 +1,6 @@
 using DocFlow.Api.Authentication;
 using DocFlow.Api.BackgroundServices;
+using DocFlow.Api.Documents;
 using DocFlow.Api.Observability;
 using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
@@ -91,6 +92,7 @@ builder.Services.AddDbContext<DocFlowDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddSingleton<OperationalMetrics>();
+builder.Services.AddScoped<DocumentIntakeService>();
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
 builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExportService>();
 builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();
