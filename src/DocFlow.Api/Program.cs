@@ -1,5 +1,6 @@
 using DocFlow.Api.Authentication;
 using DocFlow.Api.BackgroundServices;
+using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
 using DocFlow.Infrastructure.Documents;
 using DocFlow.Infrastructure.Export;
@@ -50,6 +51,20 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services
+    .AddOptions<DocumentRetentionOptions>()
+    .Bind(builder.Configuration.GetSection(DocumentRetentionOptions.ConfigurationSection))
+    .Validate(
+        options => options.DefaultRetentionDays is >= 1 and <= 3650,
+        "Retention DefaultRetentionDays must be between 1 and 3650.")
+    .Validate(
+        options => options.SweepIntervalSeconds is >= 1 and <= 86400,
+        "Retention SweepIntervalSeconds must be between 1 and 86400.")
+    .Validate(
+        options => options.BatchSize is >= 1 and <= 1000,
+        "Retention BatchSize must be between 1 and 1000.")
+    .ValidateOnStart();
+
+builder.Services
     .AddAuthentication(ApiKeyAuthenticationDefaults.Scheme)
     .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
         ApiKeyAuthenticationDefaults.Scheme,
@@ -70,9 +85,11 @@ builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
 
 // Hosted services start in registration order. Recovery enqueues persisted orphaned work
-// before the normal single-reader queue consumer begins processing.
+// before the normal single-reader queue consumer begins processing. Retention runs after
+// processing startup and only considers terminal documents.
 builder.Services.AddHostedService<DocumentProcessingRecoveryHostedService>();
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
+builder.Services.AddHostedService<DocumentRetentionHostedService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
 if (!Path.IsPathRooted(storageRoot))
