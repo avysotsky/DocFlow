@@ -1,85 +1,240 @@
 # DocFlow — handoff v1.1.1.23 Batch Idempotency
 
-Status: **ACTIVE**  
+Status: **COMPLETED**  
 Repository: `avysotsky/DocFlow`  
 Branch: `DocFlow/v_1.1.1.23_BatchIdempotency`  
 Base: `DocFlow/v_1.1.1.22_IdempotencyCleanup`
 
-## Why this milestone exists
+## 1. Milestone result
 
-`POST /api/documents/batch` is bounded and partial-success, but a client retry after a timeout can create duplicate documents for every previously accepted item. Single-upload idempotency already solves this for `POST /api/documents`; batch needs a separate contract because one request can contain accepted, rejected and retryable failed items.
+Batch intake now supports persisted request-level idempotency without replacing the existing partial-success semantics.
 
-## Contract selected after inspection
-
-Idempotency is request-level and optional through the existing `Idempotency-Key` header.
-
-The ordered batch request has one persisted manifest:
+Authoritative implementation commit:
 
 ```text
-(CustomerId, external key)
-+ ordered request fingerprint
-+ GenerationId
-+ optional completed response snapshot
-+ CreatedAt / ExpiresAt
+cdd41a13f862b586be4024ac4c8f7b078061cda7
+Add persisted batch intake idempotency
 ```
 
-Each batch item uses the already-proven single-upload idempotency engine under a deterministic internal key:
+Final validation:
+
+```text
+.NET CI #38
+run id: 36906324232
+result: success
+
+Automation E2E #114
+run id: 36906324346
+result: success
+```
+
+No Deployment Smoke, Scanned OCR E2E or Public Reference Benchmark was required because deployment/OCR/extraction behavior did not change.
+
+## 2. API contract
+
+`POST /api/documents/batch` accepts the same optional external header used by single-document intake:
+
+```text
+Idempotency-Key: <1..128 chars>
+```
+
+Without the header, the previous bounded partial-success behavior is unchanged.
+
+Caller-supplied keys beginning with the reserved prefix are rejected:
+
+```text
+docflow-internal:
+```
+
+This namespace is reserved for DocFlow's internal durable item checkpoints.
+
+## 3. Whole-request identity
+
+Batch idempotency is defined over the whole **ordered** request.
+
+Fingerprint:
+
+```text
+SHA-256(
+  version marker
+  + file count
+  + for each item in request order:
+      index
+      filename
+      content type
+      length
+      full file bytes
+)
+```
+
+Therefore reordering files under the same tenant/key is a different request and returns `409 Conflict`.
+
+## 4. Persisted manifest
+
+New table:
+
+```text
+BatchIntakeIdempotencyRecords
+```
+
+Primary key:
+
+```text
+(CustomerId, Key)
+```
+
+Persisted fields:
+
+```text
+RequestFingerprint
+GenerationId
+ResponseJson (nullable until the batch completes)
+CreatedAt
+ExpiresAt
+```
+
+There is no FK to `Documents`; deleting a document does not immediately release or mutate the batch request key.
+
+Migration:
+
+```text
+20261001182000_AddBatchIntakeIdempotencyRecords
+```
+
+## 5. Durable per-item checkpoints
+
+Each manifest generation derives deterministic internal per-item keys:
 
 ```text
 docflow-internal:batch:<GenerationId>:<item-index>
 ```
 
-External callers may not use the reserved `docflow-internal:` prefix.
+Those keys are processed by the existing single-document persisted idempotency engine. This deliberately reuses the already tested storage upload, database persistence, rollback and advisory-lock path rather than creating a second document-intake implementation.
 
-## Why item-level internal keys are used
-
-This makes each item a durable checkpoint without duplicating document/storage persistence logic:
+Per-item behavior:
 
 ```text
-Accepted item -> persisted/replayed, no duplicate document on retry
-Rejected item -> persisted/replayed
-Failed infrastructure item -> no completed idempotency record, so retry executes it again
+Accepted -> durable single-item checkpoint and document id
+Rejected -> durable deterministic rejection checkpoint
+Failed infrastructure outcome -> no completed item checkpoint, retry remains possible
 ```
 
-A batch manifest is only marked complete when no item outcome is `Failed`. Until then, a retry with the same external key and identical ordered payload reuses the same GenerationId and therefore resumes through the same item keys.
+The batch manifest is marked complete only when `FailedCount == 0`.
 
-## Fingerprint
+If the manifest is still incomplete, a retry with the same tenant/key and identical ordered payload reuses the same `GenerationId`, so already accepted/rejected items replay and unfinished failed items can execute again.
 
-The batch fingerprint is SHA-256 over a version marker, file count and each file in request order, including filename, content type, length and full bytes. Reordering files changes the fingerprint.
+## 6. Replay/conflict/concurrency
 
-## Replay/conflict semantics
+Within the configured idempotency retention window:
 
 ```text
-same tenant + key + completed same batch -> exact response replay + Idempotency-Replayed: true
-same tenant + key + incomplete same batch -> resume item checkpoints
-same tenant + key + different ordered batch -> 409 Conflict
-same key in another tenant -> independent namespace
-no Idempotency-Key -> existing batch behavior unchanged
+same tenant + same key + completed identical batch
+  -> replay completed batch snapshot
+  -> Idempotency-Replayed: true
+
+same tenant + same key + incomplete identical batch
+  -> reuse same GenerationId and item checkpoints
+
+same tenant + same key + different ordered batch
+  -> 409 Conflict
+
+same key + different tenant
+  -> independent namespace
 ```
 
-Concurrent identical requests share the same manifest generation. Internal per-item PostgreSQL advisory locks serialize each item, preventing duplicate durable documents.
+Batch manifest operations use a PostgreSQL transaction advisory lock with a separate batch lock scope. Individual items use the existing single-item advisory lock scope.
 
-## Persistence
+Two concurrent identical batch requests therefore share one generation and the same deterministic item keys. The E2E concurrency test proved that both requests returned the same response/document id and only one accepted durable document was created.
 
-Add a dedicated `BatchIntakeIdempotencyRecord`; do not overload the single-document record. It has no FK to `Documents`.
+## 7. Completion durability
 
-Expired batch manifests must participate in the existing bounded idempotency cleanup. Existing internal item records are already cleaned by the single-record cleanup path.
+Accepted/rejected item checkpoints commit independently while a batch is processed.
 
-## Non-goals
+When all items finish without an infrastructure `Failed` outcome, DocFlow persists the completed batch response snapshot under the batch advisory lock.
 
-Do not add semantic content deduplication, Redis, external locks, a distributed queue, ZIP/email ingestion, or multi-instance scheduling.
+If final manifest snapshot persistence itself fails after item checkpoints are durable, the API logs the error and returns the current result. A later retry reuses the same generation/item checkpoints and can persist the completed manifest without duplicating accepted documents.
 
-## Acceptance
+## 8. Cleanup
+
+`IntakeIdempotencyCleanupHostedService` now cleans both:
 
 ```text
-no key -> existing batch behavior
-mixed Accepted + Rejected batch completes and can replay equivalent response
-replay does not create another accepted document
-ordered payload change under same key -> 409
-same key across tenants -> independent
-concurrent same-key identical batches -> one durable accepted document per accepted item
-incomplete manifest can resume through durable item checkpoints
-batch manifest expiry/cleanup remains bounded
+IntakeIdempotencyRecords
+BatchIntakeIdempotencyRecords
+```
+
+Each record type is bounded by the configured `CleanupBatchSize` per sweep.
+
+Single records acquire the existing single-key advisory lock. Batch manifests acquire the batch-key advisory lock. Both re-check `ExpiresAt <= cutoff` after locking before deletion.
+
+Automation E2E #114 seeded two expired + one unexpired batch manifests with cleanup batch size 1 and proved the expired manifests were drained across sweeps while the unexpired manifest remained.
+
+## 9. Single-intake hardening included
+
+The milestone centralized external idempotency-key validation and reserved-prefix handling in `IntakeIdempotencyKey`.
+
+It also fixed a scoped-DbContext edge case in rejected single-item persistence: if saving a newly created rejected idempotency record fails, that Added entity is now detached so a subsequent item in the same batch cannot accidentally retry the broken tracked entity.
+
+## 10. E2E coverage
+
+Automation E2E #114 proves:
+
+```text
+existing no-key batch behavior remains green
 single-upload idempotency remains green
-.NET CI + Automation E2E green
+expired single idempotency records are cleaned
+expired batch manifests are cleaned
+mixed Accepted + Rejected batch completes
+same key/same ordered batch -> exact response replay
+replay header -> true
+replay creates no duplicate accepted document
+same key/reordered batch -> 409
+same key across tenants -> independent accepted document
+reserved internal prefix -> 400
+2 concurrent same-key batches -> same response/document id
+2 concurrent same-key batches -> only one accepted durable document
+restart/review/retention regression remains green
+```
+
+The implementation supports resuming retryable failed items through durable item checkpoints. The current E2E suite does not deliberately inject a storage/database failure mid-batch; do not claim a fault-injection test that does not exist.
+
+## 11. Reliability boundary
+
+DocFlow still intentionally uses the existing operational model:
+
+```text
+PostgreSQL persisted state
++ startup reconciliation
++ in-memory single-reader processing Channel<Guid>
++ bounded processing retries
++ document retention sweep
++ idempotency cleanup sweep
++ row locking for delete
++ PostgreSQL advisory locks for intake/idempotency
++ process-local metrics
+```
+
+Do not add RabbitMQ/Kafka/Redis/distributed schedulers merely for architecture aesthetics. Add distributed ownership only when multiple active instances become a real deployment requirement.
+
+## 12. Recommended next milestone
+
+Strong next candidate: `v1.1.1.24_PerTenantRetentionPolicy`.
+
+Current document retention has one deployment-wide configuration:
+
+```text
+Retention.Enabled
+Retention.DefaultRetentionDays
+```
+
+For a commercial multi-tenant product, different customers may require different retention periods or no automatic retention at all. Inspect authenticated API-client/customer configuration and the document creation boundary before deciding the narrowest tenant-policy representation.
+
+Preserve these rules:
+
+```text
+default deployment behavior remains backward compatible
+retention decision is derived from trusted tenant identity/config, never request payload
+Uploaded/Processing documents are never auto-deleted
+terminal-only sweep safety remains unchanged
+no distributed scheduler
 ```

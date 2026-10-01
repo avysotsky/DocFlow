@@ -9,6 +9,7 @@ The system converts digital or scanned PDF documents into validated structured d
 ```text
 Authenticated customer API
   -> single PDF upload or bounded multi-PDF batch intake
+  -> optional tenant-scoped Idempotency-Key for single and batch intake
   -> shared validation/storage/persistence intake service
   -> startup recovery of orphaned Uploaded/Processing work
   -> bounded background processing attempts
@@ -75,7 +76,7 @@ Do not commit production API keys. Supply them with environment variables, user-
 
 ## Batch intake
 
-Single-document and batch uploads now share the same scoped intake service, so PDF validation, storage, persistence rollback, retention timestamp assignment and processing enqueue are not duplicated across endpoints.
+Single-document and batch uploads share the same scoped intake service, so PDF validation, storage, persistence rollback, retention timestamp assignment and processing enqueue are not duplicated across endpoints.
 
 Single upload:
 
@@ -104,6 +105,68 @@ The 60 MB transport limit exists only to allow multipart headers/boundaries arou
 Batch-level zero-file, file-count and aggregate-size violations return `400` before any file is persisted. Inside an accepted batch, files are handled sequentially and independently, preserving input order. Per-file outcomes are `Accepted`, `Rejected`, or `Failed`; valid files can be persisted/enqueued even when another file in the same batch fails validation.
 
 A database failure rolls back that file's storage object when possible and detaches the failed Added entity from the scoped EF Core context before processing the next batch item.
+
+## Intake idempotency
+
+Single and batch intake accept an optional HTTP header:
+
+```text
+Idempotency-Key: <1..128 chars>
+```
+
+Keys are scoped by authenticated tenant. The reserved prefix `docflow-internal:` is rejected for caller-supplied keys because DocFlow uses that namespace for durable batch-item checkpoints.
+
+### Single upload
+
+For `POST /api/documents`, DocFlow persists the request fingerprint and accepted/rejected response snapshot in `IntakeIdempotencyRecords`.
+
+Within the retention window:
+
+```text
+same tenant + same key + same request -> replay original response
+same tenant + same key + different request -> 409 Conflict
+same key + different tenant -> independent namespace
+```
+
+Replay responses include:
+
+```text
+Idempotency-Replayed: true
+```
+
+Concurrent same-key requests are serialized with a PostgreSQL transaction advisory lock before storage upload, preventing duplicate durable documents. Deterministic validation rejections are persisted and replayed; storage/database infrastructure failures remain retryable and are not recorded as completed outcomes.
+
+### Batch upload
+
+For `POST /api/documents/batch`, idempotency is defined over the **whole ordered request**. The batch fingerprint includes file count and, in order, each file index, filename, content type, length and full bytes. Reordering otherwise-identical files therefore produces a different request and conflicts under the same key.
+
+DocFlow persists a `BatchIntakeIdempotencyRecord` manifest containing the external tenant/key fingerprint, a `GenerationId`, an optional completed response snapshot, and expiry metadata. Each item is then processed through the existing single-file idempotency engine under a deterministic internal key:
+
+```text
+docflow-internal:batch:<GenerationId>:<item-index>
+```
+
+This makes each accepted/rejected item a durable checkpoint without duplicating storage or document-persistence logic. If an item has a retryable infrastructure `Failed` outcome, the batch manifest remains incomplete; a retry with the same key and identical ordered payload reuses the same generation, replays already completed items and retries the unfinished item. Once every item is `Accepted` or `Rejected`, the complete batch response is persisted and subsequent requests replay it with `Idempotency-Replayed: true`.
+
+Concurrent identical batches share the same manifest generation and item keys. Batch-manifest locking plus per-item advisory locking prevents duplicate accepted documents.
+
+### Expiry and cleanup
+
+Default configuration:
+
+```json
+{
+  "Intake": {
+    "Idempotency": {
+      "RetentionHours": 24,
+      "CleanupIntervalSeconds": 3600,
+      "CleanupBatchSize": 500
+    }
+  }
+}
+```
+
+Expired single records and batch manifests are physically removed by `IntakeIdempotencyCleanupHostedService` in bounded sweeps. Before deleting a candidate, cleanup acquires the corresponding PostgreSQL advisory lock and re-checks expiry, so it cannot delete a key that intake has just renewed. Cleanup remains part of the current single-instance operational model; the PostgreSQL locks protect key-level transaction correctness, not a general distributed scheduler.
 
 ## Review audit attribution
 
@@ -339,9 +402,9 @@ src/
 
 Main responsibility split:
 
-- **DocFlow.Api** — authenticated single/batch intake, operator metrics surface, source-file streaming, lifecycle/delete, retention scheduling, processing diagnostics, startup recovery, health probes and background-service host.
+- **DocFlow.Api** — authenticated single/batch intake, single/batch idempotency coordination, operator metrics surface, source-file streaming, lifecycle/delete, retention scheduling, processing diagnostics, startup recovery, health probes and background-service host.
 - **DocFlow.Application** — processing/export/review/deletion abstractions plus process-local operational metric state.
-- **DocFlow.Domain** — document, extraction-result and review entities/enums.
+- **DocFlow.Domain** — document, extraction-result, review and idempotency entities.
 - **DocFlow.Infrastructure** — EF Core/PostgreSQL persistence, file storage, Python runner, processing/review/deletion and export implementation.
 - **DocFlow.Extraction.Worker** — Python PDF/OCR parsing, deterministic semantic extraction, validation and benchmark tooling.
 
@@ -367,8 +430,8 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 ## Project status
 
-Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, protected low-cardinality process-local operational metrics, and bounded partial-success multi-PDF batch intake through the same single-document intake service.
+Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, protected low-cardinality process-local operational metrics, bounded partial-success multi-PDF batch intake, persisted single-upload idempotency with physical cleanup, and persisted whole-request batch idempotency with durable per-item checkpoints.
 
-A strong next reliability gap is HTTP intake idempotency. A client retry after a network timeout can currently create duplicate durable documents, and batch retry can multiply the problem. Inspect tenant-scoped persisted idempotency-key semantics before adding broader ingestion channels or distributed infrastructure.
+The next strong multi-tenant product gap is retention configuration. Retention currently has one global `DefaultRetentionDays`; a commercial tenant model may require different retention periods or retention disabled for selected customers. Inspect the authentication/client configuration and document-creation boundary before introducing per-tenant policy, and keep the existing terminal-only cleanup safety rule.
 
 Production code remains private. A separate public portfolio repository may be created later.
