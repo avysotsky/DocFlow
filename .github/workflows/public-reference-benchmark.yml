@@ -47,6 +47,10 @@ jobs:
         working-directory: src/DocFlow.Extraction.Worker
         run: python -m pip install -e ".[dev]"
 
+      - name: Run Python worker regression tests
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pytest -q
+
       - name: Build corpus from original public supplier PDFs
         shell: bash
         run: |
