@@ -1,7 +1,9 @@
 using DocFlow.Api.Authentication;
 using DocFlow.Api.BackgroundServices;
+using DocFlow.Api.Observability;
 using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
+using DocFlow.Application.Observability;
 using DocFlow.Infrastructure.Documents;
 using DocFlow.Infrastructure.Export;
 using DocFlow.Infrastructure.Persistence;
@@ -65,6 +67,17 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services
+    .AddOptions<OperationalMetricsOptions>()
+    .Bind(builder.Configuration.GetSection(OperationalMetricsOptions.ConfigurationSection))
+    .Validate(
+        options => !options.Enabled || !string.IsNullOrWhiteSpace(options.ApiKey),
+        "Operations metrics ApiKey is required when metrics are enabled.")
+    .Validate(
+        options => !options.Enabled || options.ApiKey.Length <= 512,
+        "Operations metrics ApiKey must not exceed 512 characters.")
+    .ValidateOnStart();
+
+builder.Services
     .AddAuthentication(ApiKeyAuthenticationDefaults.Scheme)
     .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
         ApiKeyAuthenticationDefaults.Scheme,
@@ -77,6 +90,7 @@ var connectionString = builder.Configuration.GetConnectionString("DocFlowDbConte
 builder.Services.AddDbContext<DocFlowDbContext>(options =>
     options.UseNpgsql(connectionString));
 
+builder.Services.AddSingleton<OperationalMetrics>();
 builder.Services.AddScoped<IExtractionResultService, ExtractionResultService>();
 builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExportService>();
 builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();

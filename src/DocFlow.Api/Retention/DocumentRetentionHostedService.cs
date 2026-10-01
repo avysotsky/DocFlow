@@ -1,4 +1,5 @@
 using DocFlow.Application.Abstractions;
+using DocFlow.Application.Observability;
 using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -10,15 +11,18 @@ public sealed class DocumentRetentionHostedService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly DocumentRetentionOptions _options;
+    private readonly OperationalMetrics _metrics;
     private readonly ILogger<DocumentRetentionHostedService> _logger;
 
     public DocumentRetentionHostedService(
         IServiceScopeFactory scopeFactory,
         IOptions<DocumentRetentionOptions> options,
+        OperationalMetrics metrics,
         ILogger<DocumentRetentionHostedService> logger)
     {
         _scopeFactory = scopeFactory;
         _options = options.Value;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -48,6 +52,7 @@ public sealed class DocumentRetentionHostedService : BackgroundService
             }
             catch (Exception exception)
             {
+                _metrics.RecordRetentionFailure();
                 _logger.LogError(exception, "Document retention sweep failed.");
             }
 
@@ -117,6 +122,7 @@ public sealed class DocumentRetentionHostedService : BackgroundService
                 {
                     case DocumentDeletionOutcome.Deleted:
                         deleted++;
+                        _metrics.RecordRetentionDeleted();
                         break;
                     case DocumentDeletionOutcome.NotFound:
                     case DocumentDeletionOutcome.ActiveProcessingConflict:
@@ -134,6 +140,7 @@ public sealed class DocumentRetentionHostedService : BackgroundService
             catch (Exception exception)
             {
                 failed++;
+                _metrics.RecordRetentionFailure();
                 _logger.LogError(
                     exception,
                     "Retention deletion failed for document {DocumentId}.",

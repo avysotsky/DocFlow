@@ -1,4 +1,5 @@
 using DocFlow.Application.Abstractions;
+using DocFlow.Application.Observability;
 using DocFlow.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,15 +10,18 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
     private readonly DocFlowDbContext _dbContext;
     private readonly IDocumentExtractionRunner _extractionRunner;
     private readonly IExtractionResultService _extractionResultService;
+    private readonly OperationalMetrics _metrics;
 
     public DocumentProcessingService(
         DocFlowDbContext dbContext,
         IDocumentExtractionRunner extractionRunner,
-        IExtractionResultService extractionResultService)
+        IExtractionResultService extractionResultService,
+        OperationalMetrics metrics)
     {
         _dbContext = dbContext;
         _extractionRunner = extractionRunner;
         _extractionResultService = extractionResultService;
+        _metrics = metrics;
     }
 
     public async Task ProcessAsync(
@@ -98,6 +102,7 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
 
         document.MarkFailed();
         await _dbContext.SaveChangesAsync(cancellationToken);
+        _metrics.RecordProcessingFailed();
     }
 
     private async Task TryRecordFailureAsync(

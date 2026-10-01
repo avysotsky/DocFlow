@@ -1,4 +1,5 @@
 using DocFlow.Application.Abstractions;
+using DocFlow.Application.Observability;
 using Microsoft.Extensions.Options;
 
 namespace DocFlow.Api.BackgroundServices;
@@ -8,17 +9,20 @@ public sealed class DocumentProcessingBackgroundService : BackgroundService
     private readonly IDocumentProcessingQueue _queue;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly DocumentProcessingRetryOptions _retryOptions;
+    private readonly OperationalMetrics _metrics;
     private readonly ILogger<DocumentProcessingBackgroundService> _logger;
 
     public DocumentProcessingBackgroundService(
         IDocumentProcessingQueue queue,
         IServiceScopeFactory scopeFactory,
         IOptions<DocumentProcessingRetryOptions> retryOptions,
+        OperationalMetrics metrics,
         ILogger<DocumentProcessingBackgroundService> logger)
     {
         _queue = queue;
         _scopeFactory = scopeFactory;
         _retryOptions = retryOptions.Value;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -68,6 +72,8 @@ public sealed class DocumentProcessingBackgroundService : BackgroundService
             }
             catch (Exception exception) when (attempt < _retryOptions.MaxAttempts)
             {
+                _metrics.RecordProcessingRetry();
+
                 _logger.LogWarning(
                     exception,
                     "Document {DocumentId} processing attempt {Attempt} of {MaxAttempts} failed. Retrying.",

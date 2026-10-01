@@ -1,4 +1,5 @@
 using DocFlow.Application.Abstractions;
+using DocFlow.Application.Observability;
 using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
@@ -9,10 +10,14 @@ namespace DocFlow.Infrastructure.Processing;
 public sealed class ExtractionResultService : IExtractionResultService
 {
     private readonly DocFlowDbContext _dbContext;
+    private readonly OperationalMetrics _metrics;
 
-    public ExtractionResultService(DocFlowDbContext dbContext)
+    public ExtractionResultService(
+        DocFlowDbContext dbContext,
+        OperationalMetrics metrics)
     {
         _dbContext = dbContext;
+        _metrics = metrics;
     }
 
     public async Task<SaveExtractionResultResult> SaveAsync(
@@ -55,6 +60,11 @@ public sealed class ExtractionResultService : IExtractionResultService
             document.MarkNeedsReview(documentType);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (validationStatus == ValidationStatus.Valid)
+            _metrics.RecordProcessingCompleted();
+        else
+            _metrics.RecordProcessingNeedsReview();
 
         var savedResult = new SavedExtractionResult(
             extractionResult.Id,

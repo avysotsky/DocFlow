@@ -1,4 +1,5 @@
 using DocFlow.Application.Abstractions;
+using DocFlow.Application.Observability;
 using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
@@ -10,10 +11,14 @@ namespace DocFlow.Infrastructure.Processing;
 public sealed class DocumentReviewService : IDocumentReviewService
 {
     private readonly DocFlowDbContext _dbContext;
+    private readonly OperationalMetrics _metrics;
 
-    public DocumentReviewService(DocFlowDbContext dbContext)
+    public DocumentReviewService(
+        DocFlowDbContext dbContext,
+        OperationalMetrics metrics)
     {
         _dbContext = dbContext;
+        _metrics = metrics;
     }
 
     public async Task<DocumentReviewResult> ReviewAsync(
@@ -73,6 +78,8 @@ public sealed class DocumentReviewService : IDocumentReviewService
         {
             return new DocumentReviewResult(DocumentReviewOutcome.AlreadyReviewed);
         }
+
+        _metrics.RecordReviewCompleted();
 
         return new DocumentReviewResult(
             DocumentReviewOutcome.Reviewed,

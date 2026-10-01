@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using DocFlow.Application.Abstractions;
+using DocFlow.Application.Observability;
 
 namespace DocFlow.Infrastructure.Processing;
 
@@ -13,19 +14,29 @@ public sealed class DocumentProcessingQueue : IDocumentProcessingQueue
             AllowSynchronousContinuations = false
         });
 
-    public ValueTask EnqueueAsync(
+    private readonly OperationalMetrics _metrics;
+
+    public DocumentProcessingQueue(OperationalMetrics metrics)
+    {
+        _metrics = metrics;
+    }
+
+    public async ValueTask EnqueueAsync(
         Guid documentId,
         CancellationToken cancellationToken = default)
     {
         if (documentId == Guid.Empty)
             throw new ArgumentException("Document id is required.", nameof(documentId));
 
-        return _channel.Writer.WriteAsync(documentId, cancellationToken);
+        await _channel.Writer.WriteAsync(documentId, cancellationToken);
+        _metrics.RecordQueueEnqueued();
     }
 
-    public ValueTask<Guid> DequeueAsync(
+    public async ValueTask<Guid> DequeueAsync(
         CancellationToken cancellationToken = default)
     {
-        return _channel.Reader.ReadAsync(cancellationToken);
+        var documentId = await _channel.Reader.ReadAsync(cancellationToken);
+        _metrics.RecordQueueDequeued();
+        return documentId;
     }
 }

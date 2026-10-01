@@ -201,10 +201,16 @@ def main() -> None:
     )
     assert status == 404, status
 
+    # Operational metrics are opt-in. The normal E2E runtime uses repository defaults,
+    # so even an authenticated tenant request must not discover the operator endpoint.
+    status, _ = request_json("GET", f"{base}/operations/metrics", args.api_key)
+    assert status == 404, status
+
     print(
         "Document review E2E passed: stale/malformed writes rejected, NeedsReview corrected to "
         "Processed, authenticated client attribution persisted without trusting payload identity, "
-        "reviewed data returned/exported, duplicate/non-reviewable/missing reviews handled predictably."
+        "reviewed data returned/exported, operator metrics hidden by default, "
+        "duplicate/non-reviewable/missing reviews handled predictably."
     )
 
 
