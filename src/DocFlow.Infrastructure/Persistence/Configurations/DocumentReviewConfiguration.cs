@@ -27,11 +27,6 @@ public sealed class DocumentReviewConfiguration : IEntityTypeConfiguration<Docum
             .HasForeignKey<DocumentReview>(x => x.DocumentId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasOne<ExtractionResult>()
-            .WithOne()
-            .HasForeignKey<DocumentReview>(x => x.ExtractionResultId)
-            .OnDelete(DeleteBehavior.Cascade);
-
         builder.HasIndex(x => x.DocumentId)
             .IsUnique();
 
