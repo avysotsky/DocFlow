@@ -88,6 +88,38 @@ class SupplierInvoiceValidator(SupplierQuotationValidator):
         self,
         invoice: SupplierInvoiceData,
     ) -> ValidationCheckResult:
+        if invoice.tax_inclusive:
+            if invoice.total is None:
+                return ValidationCheckResult(
+                    status="skipped",
+                    message="Tax-inclusive invoice total was not extracted.",
+                )
+            if not invoice.items or any(item.line_total is None for item in invoice.items):
+                return ValidationCheckResult(
+                    status="skipped",
+                    message="Tax-inclusive total cannot be checked because item line totals are incomplete.",
+                )
+
+            expected = self._money(
+                sum(
+                    (item.line_total for item in invoice.items if item.line_total is not None),
+                    Decimal("0"),
+                )
+            )
+            actual = self._money(invoice.total)
+            if abs(expected - actual) > self.tolerance:
+                return ValidationCheckResult(
+                    status="failed",
+                    message="Tax-inclusive invoice total does not equal the sum of item line totals.",
+                    details={"expected": str(expected), "actual": str(actual)},
+                )
+
+            return ValidationCheckResult(
+                status="passed",
+                message="Tax-inclusive invoice total equals the sum of item line totals.",
+                details={"expected": str(expected), "actual": str(actual)},
+            )
+
         if invoice.discount_amount is None:
             return super()._validate_subtotal(invoice)  # type: ignore[arg-type]
 
@@ -158,6 +190,31 @@ class SupplierInvoiceValidator(SupplierQuotationValidator):
         self,
         invoice: SupplierInvoiceData,
     ) -> ValidationCheckResult:
+        if invoice.tax_inclusive:
+            if invoice.subtotal is None or invoice.vat_amount is None or invoice.total is None:
+                return ValidationCheckResult(
+                    status="skipped",
+                    message=(
+                        "Tax-inclusive GST cannot be checked because net subtotal, GST amount, "
+                        "or total is missing."
+                    ),
+                )
+
+            expected = self._money(invoice.subtotal + invoice.vat_amount)
+            actual = self._money(invoice.total)
+            if abs(expected - actual) > self.tolerance:
+                return ValidationCheckResult(
+                    status="failed",
+                    message="Tax-inclusive total does not reconcile to net subtotal plus GST.",
+                    details={"expected": str(expected), "actual": str(actual)},
+                )
+
+            return ValidationCheckResult(
+                status="passed",
+                message="Tax-inclusive total reconciles to net subtotal plus GST.",
+                details={"expected": str(expected), "actual": str(actual)},
+            )
+
         if not invoice.tax_breakdown:
             return super()._validate_vat(invoice)  # type: ignore[arg-type]
 

@@ -6,6 +6,7 @@ on:
     branches:
       - 'DocFlow/v_1.1.1.5_RealCorpus'
       - 'DocFlow/v_1.1.1.6_HardCases'
+      - 'DocFlow/v_1.1.1.6_HardCases_2'
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
       - '.github/scripts/add_multipage_public_reference.py'

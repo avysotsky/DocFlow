@@ -31,6 +31,7 @@ class SupplierInvoiceData(BaseModel):
     purchase_order_number: str | None = None
     items: list[SupplierInvoiceItem] = Field(default_factory=list)
     discount_amount: Decimal | None = None
+    tax_inclusive: bool = False
     subtotal: Decimal | None = None
     vat_rate: Decimal | None = None
     vat_amount: Decimal | None = None
