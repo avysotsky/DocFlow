@@ -1,5 +1,5 @@
 name: Public Reference Benchmark
-# Validation batch: French real-layout header and totals fix
+# Validation batch: HardCases corpus breadth + retained GST/French paths
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
       - 'DocFlow/v_1.1.1.6_HardCases_2'
     paths:
       - '.github/scripts/build_public_reference_corpus.py'
+      - '.github/scripts/add_breadth_public_reference.py'
       - '.github/scripts/add_multipage_public_reference.py'
       - '.github/scripts/add_french_multivat_public_reference.py'
       - '.github/scripts/correct_public_reference_selection.py'
@@ -61,6 +62,9 @@ jobs:
             --output /tmp/docflow-public-reference \
             --min-documents 8
 
+          python .github/scripts/add_breadth_public_reference.py \
+            --root /tmp/docflow-public-reference
+
           python .github/scripts/add_multipage_public_reference.py \
             --root /tmp/docflow-public-reference
 
@@ -87,8 +91,8 @@ jobs:
           cat /tmp/docflow-public-reference/sources-report.json
 
           count=$(jq -r '.manifest_documents' /tmp/docflow-public-reference/build-summary.json)
-          if [ "$count" -lt 8 ]; then
-            echo "HardCases requires at least 8 admitted public-reference documents."
+          if [ "$count" -lt 15 ]; then
+            echo "HardCases requires at least 15 admitted public-reference documents."
             exit 2
           fi
 
@@ -96,7 +100,11 @@ jobs:
             phoenix-petroleum-invoice-472557 \
             cargo-international-invoice-g59771 \
             casterton-foodworks-invoice-02706 \
-            facturalex-french-multivat-f20260023
+            facturalex-french-multivat-f20260023 \
+            ct-gardens-invoice-inv-0055 \
+            ct-gardens-invoice-inv-0065 \
+            ct-gardens-invoice-inv-0220 \
+            teec-invoice-inv-5383
           do
             if ! jq -e --arg id "$required" '.documents[] | select(.id == $id)' \
               /tmp/docflow-public-reference/manifest.json > /dev/null; then
