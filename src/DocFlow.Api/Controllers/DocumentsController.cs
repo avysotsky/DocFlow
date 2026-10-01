@@ -18,6 +18,7 @@ public sealed class DocumentsController : ControllerBase
 {
     private const int MaxBatchFiles = 10;
     private const long MaxBatchSize = 50L * 1024 * 1024;
+    private const long MaxBatchRequestSize = 60L * 1024 * 1024;
     private const int MaxPageSize = 100;
     private const int MaxDocumentTypeLength = 100;
 
@@ -363,6 +364,7 @@ public sealed class DocumentsController : ControllerBase
 
     [HttpPost("batch")]
     [Consumes("multipart/form-data")]
+    [RequestSizeLimit(MaxBatchRequestSize)]
     [ProducesResponseType(typeof(BatchUploadDocumentsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
