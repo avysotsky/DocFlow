@@ -1,15 +1,13 @@
 using System.Text.Json;
 using DocFlow.Api.Authentication;
-using DocFlow.Api.Retention;
+using DocFlow.Api.Documents;
 using DocFlow.Application.Abstractions;
-using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 
 namespace DocFlow.Api.Controllers;
 
@@ -18,28 +16,26 @@ namespace DocFlow.Api.Controllers;
 [Route("api/documents")]
 public sealed class DocumentsController : ControllerBase
 {
-    private const long MaxFileSize = 20 * 1024 * 1024;
+    private const int MaxBatchFiles = 10;
+    private const long MaxBatchSize = 50L * 1024 * 1024;
     private const int MaxPageSize = 100;
     private const int MaxDocumentTypeLength = 100;
 
     private readonly DocFlowDbContext _dbContext;
-    private readonly IFileStorage _fileStorage;
     private readonly IExtractionResultService _extractionResultService;
     private readonly IDocumentProcessingQueue _documentProcessingQueue;
-    private readonly DocumentRetentionOptions _retentionOptions;
+    private readonly DocumentIntakeService _documentIntakeService;
 
     public DocumentsController(
         DocFlowDbContext dbContext,
-        IFileStorage fileStorage,
         IExtractionResultService extractionResultService,
         IDocumentProcessingQueue documentProcessingQueue,
-        IOptions<DocumentRetentionOptions> retentionOptions)
+        DocumentIntakeService documentIntakeService)
     {
         _dbContext = dbContext;
-        _fileStorage = fileStorage;
         _extractionResultService = extractionResultService;
         _documentProcessingQueue = documentProcessingQueue;
-        _retentionOptions = retentionOptions.Value;
+        _documentIntakeService = documentIntakeService;
     }
 
     [HttpGet]
@@ -334,81 +330,107 @@ public sealed class DocumentsController : ControllerBase
     [ProducesResponseType(typeof(UploadDocumentResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<UploadDocumentResponse>> Upload(
         [FromForm] UploadDocumentRequest request,
         CancellationToken cancellationToken)
     {
-        var customerId = User.GetRequiredCustomerId();
-        var file = request.File;
+        var result = await _documentIntakeService.IntakeAsync(
+            User.GetRequiredCustomerId(),
+            request.File,
+            cancellationToken);
 
-        if (file is null || file.Length == 0)
-            return BadRequest("A non-empty PDF file is required.");
+        if (result.Outcome == DocumentIntakeOutcome.Rejected)
+            return BadRequest(result.Error);
 
-        if (file.Length > MaxFileSize)
-            return BadRequest("The PDF file must not exceed 20 MB.");
-
-        if (!string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
-            return BadRequest("Only PDF files are supported.");
-
-        if (!string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
-            return BadRequest("The file content type must be application/pdf.");
-
-        if (!await HasPdfSignatureAsync(file, cancellationToken))
-            return BadRequest("The uploaded file does not have a valid PDF signature.");
-
-        string storageKey;
-        await using (var input = file.OpenReadStream())
+        if (result.Outcome == DocumentIntakeOutcome.Failed)
         {
-            storageKey = await _fileStorage.UploadAsync(
-                input,
-                file.FileName,
-                file.ContentType,
-                cancellationToken);
+            return Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Document intake failed.",
+                detail: result.Error);
         }
-
-        var deleteAt = _retentionOptions.Enabled
-            ? DateTimeOffset.UtcNow.AddDays(_retentionOptions.DefaultRetentionDays)
-            : (DateTimeOffset?)null;
-
-        var document = new Document(
-            customerId,
-            file.FileName,
-            file.ContentType,
-            storageKey,
-            file.Length,
-            deleteAt);
-
-        try
-        {
-            _dbContext.Documents.Add(document);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            try
-            {
-                await _fileStorage.DeleteAsync(storageKey, CancellationToken.None);
-            }
-            catch
-            {
-                // Preserve the original database exception.
-            }
-
-            throw;
-        }
-
-        await _documentProcessingQueue.EnqueueAsync(
-            document.Id,
-            CancellationToken.None);
 
         var response = new UploadDocumentResponse(
-            document.Id,
-            document.Status.ToString(),
-            document.OriginalFileName,
-            document.CreatedAt,
-            document.DeleteAt);
+            result.DocumentId!.Value,
+            result.DocumentStatus!,
+            result.OriginalFileName,
+            result.CreatedAt!.Value,
+            result.DeleteAt);
 
         return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    [HttpPost("batch")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(BatchUploadDocumentsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<BatchUploadDocumentsResponse>> UploadBatch(
+        [FromForm] BatchUploadDocumentsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Files.Count == 0)
+            return BadRequest("At least one PDF file is required.");
+
+        if (request.Files.Count > MaxBatchFiles)
+            return BadRequest($"A batch must not contain more than {MaxBatchFiles} files.");
+
+        long aggregateSize = 0;
+        foreach (var file in request.Files)
+        {
+            if (file.Length > MaxBatchSize - aggregateSize)
+                return BadRequest("The batch payload must not exceed 50 MB in total.");
+
+            aggregateSize += file.Length;
+        }
+
+        var customerId = User.GetRequiredCustomerId();
+        var items = new List<BatchUploadDocumentItemResponse>(request.Files.Count);
+        var accepted = 0;
+        var rejected = 0;
+        var failed = 0;
+
+        for (var index = 0; index < request.Files.Count; index++)
+        {
+            var result = await _documentIntakeService.IntakeAsync(
+                customerId,
+                request.Files[index],
+                cancellationToken);
+
+            switch (result.Outcome)
+            {
+                case DocumentIntakeOutcome.Accepted:
+                    accepted++;
+                    break;
+                case DocumentIntakeOutcome.Rejected:
+                    rejected++;
+                    break;
+                case DocumentIntakeOutcome.Failed:
+                    failed++;
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Unsupported document intake outcome '{result.Outcome}'.");
+            }
+
+            items.Add(new BatchUploadDocumentItemResponse(
+                index,
+                result.OriginalFileName,
+                result.Outcome.ToString(),
+                result.DocumentId,
+                result.DocumentStatus,
+                result.CreatedAt,
+                result.DeleteAt,
+                result.Error));
+        }
+
+        return Ok(new BatchUploadDocumentsResponse(
+            request.Files.Count,
+            accepted,
+            rejected,
+            failed,
+            items));
     }
 
     private Task<bool> IsOwnedDocumentAsync(
@@ -454,7 +476,7 @@ public sealed class DocumentsController : ControllerBase
                 validationStatus = ValidationStatus.Valid;
                 return true;
             case "invalid":
-                validationStatus = ValidationStatus.Invalid;
+                validationStatus = ValidationStatus.NeedsReview;
                 return true;
             case "incomplete":
                 validationStatus = ValidationStatus.NeedsReview;
@@ -463,23 +485,6 @@ public sealed class DocumentsController : ControllerBase
                 validationStatus = default;
                 return false;
         }
-    }
-
-    private static async Task<bool> HasPdfSignatureAsync(
-        IFormFile file,
-        CancellationToken cancellationToken)
-    {
-        var signature = new byte[5];
-
-        await using var stream = file.OpenReadStream();
-        var bytesRead = await stream.ReadAsync(signature.AsMemory(0, signature.Length), cancellationToken);
-
-        return bytesRead == signature.Length
-            && signature[0] == (byte)'%'
-            && signature[1] == (byte)'P'
-            && signature[2] == (byte)'D'
-            && signature[3] == (byte)'F'
-            && signature[4] == (byte)'-';
     }
 
     public sealed class ListDocumentsRequest
@@ -515,12 +520,34 @@ public sealed class DocumentsController : ControllerBase
         public IFormFile? File { get; init; }
     }
 
+    public sealed class BatchUploadDocumentsRequest
+    {
+        public List<IFormFile> Files { get; init; } = [];
+    }
+
     public sealed record UploadDocumentResponse(
         Guid Id,
         string Status,
         string OriginalFileName,
         DateTimeOffset CreatedAt,
         DateTimeOffset? DeleteAt);
+
+    public sealed record BatchUploadDocumentsResponse(
+        int TotalCount,
+        int AcceptedCount,
+        int RejectedCount,
+        int FailedCount,
+        IReadOnlyList<BatchUploadDocumentItemResponse> Items);
+
+    public sealed record BatchUploadDocumentItemResponse(
+        int Index,
+        string OriginalFileName,
+        string Outcome,
+        Guid? DocumentId,
+        string? DocumentStatus,
+        DateTimeOffset? CreatedAt,
+        DateTimeOffset? DeleteAt,
+        string? Error);
 
     public sealed record GetDocumentResponse(
         Guid Id,
