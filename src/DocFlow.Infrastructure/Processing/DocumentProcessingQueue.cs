@@ -28,8 +28,19 @@ public sealed class DocumentProcessingQueue : IDocumentProcessingQueue
         if (documentId == Guid.Empty)
             throw new ArgumentException("Document id is required.", nameof(documentId));
 
-        await _channel.Writer.WriteAsync(documentId, cancellationToken);
+        // Reserve the gauge before publishing to the channel so the single reader can never
+        // observe an item before its pending-depth increment is visible.
         _metrics.RecordQueueEnqueued();
+
+        try
+        {
+            await _channel.Writer.WriteAsync(documentId, cancellationToken);
+        }
+        catch
+        {
+            _metrics.RecordQueueDequeued();
+            throw;
+        }
     }
 
     public async ValueTask<Guid> DequeueAsync(
