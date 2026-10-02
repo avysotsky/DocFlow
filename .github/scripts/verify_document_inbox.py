@@ -39,6 +39,18 @@ def request_json(
         return error.code, parse_body(error.read())
 
 
+def request_status(url: str, api_key: str) -> int:
+    request = urllib.request.Request(
+        url,
+        headers={"X-DocFlow-Api-Key": api_key},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
 def request_method(
     method: str,
     url: str,
@@ -424,7 +436,7 @@ def main() -> None:
     expected_source_file_url = f"/api/documents/{args.invoice_document_id}/file"
     assert invoice_detail.get("sourceFileUrl") == expected_source_file_url, invoice_detail
 
-    source_file_status, _ = request_json(
+    source_file_status = request_status(
         f"{args.base_url.rstrip('/')}{expected_source_file_url}",
         args.api_key,
     )
