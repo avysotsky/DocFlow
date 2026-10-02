@@ -234,7 +234,9 @@ The endpoint streams from `IFileStorage` rather than buffering the full file in 
 
 Cross-tenant and absent documents return `404`. If a database row exists but its backing storage file is missing, the API returns a sanitized `500` problem response without exposing filesystem or storage-key details; the underlying exception is logged server-side.
 
-`StorageKey` remains in the existing document metadata DTO for compatibility with current clients. New clients should use `/file` rather than treating the storage key as a retrievable path. Removing or deprecating that field is a separate API-versioning decision.
+`GET /api/documents/{id}` now returns a stable relative `sourceFileUrl` such as `/api/documents/{id}/file`. New clients should use that API path for source-file access.
+
+The legacy `storageKey` JSON property is still returned for backward compatibility, but generated OpenAPI marks it `deprecated: true` and directs clients to `sourceFileUrl`. It remains an internal storage locator, not a supported retrieval path. Removing the field entirely would still be a breaking contract change and should happen only behind an explicit future versioning decision.
 
 ## Document deletion and lifecycle
 
@@ -434,6 +436,6 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, protected low-cardinality process-local operational metrics, bounded partial-success multi-PDF batch intake, persisted single-upload idempotency with physical cleanup, and persisted whole-request batch idempotency with durable per-item checkpoints.
 
-Per-tenant retention overrides and fault-injected batch-resume verification are now complete. A remaining API-contract hygiene issue is the legacy `StorageKey` field in document metadata: source files already have a tenant-scoped `/file` endpoint, so new clients should not depend on an internal storage locator. Preserve compatibility while inspecting an explicit deprecation/versioning path rather than silently removing the field.
+Per-tenant retention overrides, fault-injected batch-resume verification, and backward-compatible `StorageKey` deprecation are now complete. Clients can use the stable `sourceFileUrl` contract while legacy consumers continue to receive `storageKey`. A strong next customer-facing gap is completion notification: today clients must poll status/inbox to learn when processing finishes. Inspect whether a narrow tenant-configured webhook/outbox contract is justified before introducing broader messaging infrastructure.
 
 Production code remains private. A separate public portfolio repository may be created later.
