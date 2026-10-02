@@ -150,6 +150,8 @@ This makes each accepted/rejected item a durable checkpoint without duplicating 
 
 Concurrent identical batches share the same manifest generation and item keys. Batch-manifest locking plus per-item advisory locking prevents duplicate accepted documents.
 
+Automation E2E also verifies incomplete-batch recovery under a real deterministic PostgreSQL persistence failure. The test leaves the batch manifest incomplete, confirms durable checkpoints for the unaffected items, retries the identical request after removing the fault, verifies that existing DocumentIds are reused and only the failed item is executed again, then proves that a third request is an exact completed replay. No production fault-injection path is present.
+
 ### Expiry and cleanup
 
 Default configuration:
@@ -432,6 +434,6 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, protected low-cardinality process-local operational metrics, bounded partial-success multi-PDF batch intake, persisted single-upload idempotency with physical cleanup, and persisted whole-request batch idempotency with durable per-item checkpoints.
 
-The next strong multi-tenant product gap is retention configuration. Retention currently has one global `DefaultRetentionDays`; a commercial tenant model may require different retention periods or retention disabled for selected customers. Inspect the authentication/client configuration and document-creation boundary before introducing per-tenant policy, and keep the existing terminal-only cleanup safety rule.
+Per-tenant retention overrides and fault-injected batch-resume verification are now complete. A remaining API-contract hygiene issue is the legacy `StorageKey` field in document metadata: source files already have a tenant-scoped `/file` endpoint, so new clients should not depend on an internal storage locator. Preserve compatibility while inspecting an explicit deprecation/versioning path rather than silently removing the field.
 
 Production code remains private. A separate public portfolio repository may be created later.

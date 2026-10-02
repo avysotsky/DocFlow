@@ -1,21 +1,44 @@
 # DocFlow — handoff v1.1.1.25 Batch Resume Fault Injection
 
-Status: **ACTIVE**  
+Status: **COMPLETED**  
 Repository: `avysotsky/DocFlow`  
 Branch: `DocFlow/v_1.1.1.25_BatchResumeFaultInjection`  
 Base: `DocFlow/v_1.1.1.24_PerTenantRetentionPolicy`
 
-## Goal
+## Purpose
 
-Prove the existing idempotent batch resume contract under a real deterministic mid-batch infrastructure failure, without adding production fault-injection behavior.
+This milestone did not change production/runtime behavior. It closed the remaining evidence gap in persisted batch idempotency by proving incomplete-batch resume under a real deterministic database failure.
 
-## Selected test strategy
+## Authoritative test state
 
-Use the existing Automation E2E PostgreSQL service to install a temporary `BEFORE INSERT` trigger on `Documents`.
+Final validating commit:
 
-The trigger raises an exception only when `OriginalFileName` matches one unique middle-item filename in the test batch.
+```text
+3bb4c7b5a6d06f256957e6986df6b9c49260614e
+Match persisted batch checkpoint key format
+```
 
-Test batch shape:
+Authoritative validation:
+
+```text
+Automation E2E #119
+run 36987322882
+success
+```
+
+No .NET CI run is required for the authoritative state because this milestone changes only the E2E helper and documentation; no `.cs`, `.csproj` or `.sln` file changed.
+
+## Fault strategy
+
+The existing Automation E2E PostgreSQL service temporarily installs a `BEFORE INSERT` trigger on `Documents`.
+
+The trigger raises an exception only for one unique middle-item filename. It is removed in a `finally` cleanup path before the resume request.
+
+No production fault-injection flag, random failure, alternative storage implementation or chaos subsystem was added.
+
+## Proven scenario
+
+The idempotent batch contains:
 
 ```text
 item 0 -> valid PDF -> Accepted
@@ -24,46 +47,58 @@ item 2 -> valid PDF -> injected PostgreSQL INSERT failure -> Failed
 item 3 -> valid PDF -> Accepted
 ```
 
-Expected first request:
+The first request proves:
 
 ```text
 AcceptedCount = 2
 RejectedCount = 1
 FailedCount = 1
-batch manifest remains incomplete
-durable item checkpoints exist for 0, 1 and 3
-checkpoint for failed item 2 does not exist
+batch manifest ResponseJson is NULL
+three durable item checkpoints exist
+failed item index 2 has no completed checkpoint
 ```
 
-Then the test removes the PostgreSQL trigger and repeats the exact same ordered batch with the same external `Idempotency-Key`.
+After removing the trigger, the exact same external `Idempotency-Key` and ordered payload are submitted again.
 
-Expected resume:
+The resume proves:
 
 ```text
-items 0, 1 and 3 reuse their durable checkpoints
+item 0 replays with its original DocumentId
+item 1 replays its deterministic rejection
 item 2 executes again and becomes Accepted
-original accepted DocumentIds are preserved
-no duplicate accepted Documents are created
+item 3 replays with its original DocumentId
+checkpoint count becomes 4
 batch manifest becomes complete
+only 3 accepted Documents exist for the 3 valid filenames
 ```
 
-A third identical request must be an exact completed replay with:
+A third identical request proves:
 
 ```text
+exact stored batch response replay
 Idempotency-Replayed: true
-same response snapshot
+no duplicate accepted Documents
 ```
 
-## Safety
+All accepted documents are allowed to reach terminal `Processed` status before the helper returns, so the following restart-recovery regression is not polluted by test-created queued work.
 
-- no production configuration flag;
-- no random failure;
-- no filesystem-permission trick;
-- no second storage/intake implementation;
-- trigger is unique to the test filename and removed in a `finally` cleanup path;
-- existing Automation E2E workflow is reused;
-- no extraction/OCR behavior changes.
+## Regression coverage
 
-## CI discipline
+Automation E2E #119 also completed the existing restart/review/delete/retention regression after the new fault scenario.
 
-This milestone is test-only. Updating the existing `.github/scripts/verify_batch_idempotency.py` should trigger Automation E2E only; do not force an unnecessary .NET CI run when product code has not changed.
+Extraction/OCR behavior was not changed and no extraction-specific workflow was triggered.
+
+## Diagnostic runs
+
+Two earlier test iterations were intentionally not accepted as validation:
+
+```text
+Automation E2E #116 -> failure
+  test SQL function delimiter was malformed
+
+Automation E2E #118 -> failure
+  checkpoint assertion used PostgreSQL UUID text with hyphens,
+  while internal item keys use Guid:N without hyphens
+```
+
+These were defects in the new E2E test itself, not failures of the production batch-resume implementation. The final helper normalizes the GenerationId to the actual internal key format and passes in #119.
