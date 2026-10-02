@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify request-level idempotency for bounded partial-success batch intake."""
+"""Verify batch idempotency, concurrency and incomplete-batch resume after a real DB failure."""
 
 from __future__ import annotations
 
