@@ -287,14 +287,14 @@ DROP TRIGGER IF EXISTS {trigger_name} ON "Documents";
 DROP FUNCTION IF EXISTS {trigger_function}();
 CREATE FUNCTION {trigger_function}() RETURNS trigger
 LANGUAGE plpgsql
-AS $
+AS $body$
 BEGIN
     IF NEW."OriginalFileName" = {fault_name_literal} THEN
         RAISE EXCEPTION 'docflow e2e injected document persistence failure';
     END IF;
     RETURN NEW;
 END;
-$;
+$body$;
 CREATE TRIGGER {trigger_name}
 BEFORE INSERT ON "Documents"
 FOR EACH ROW EXECUTE FUNCTION {trigger_function}();
