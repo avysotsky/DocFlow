@@ -450,6 +450,8 @@ WHERE "OriginalFileName" IN (
     assert wait_for_terminal(base_url, api_key, str(accepted_id)) == "Processed"
     assert wait_for_terminal(base_url, other_api_key, str(other_accepted_id)) == "Processed"
     assert wait_for_terminal(base_url, api_key, str(concurrent_accepted_id)) == "Processed"
+    for resume_document_id in resume_document_ids:
+        assert wait_for_terminal(base_url, api_key, str(resume_document_id)) == "Processed"
 
 
 def main() -> None:
