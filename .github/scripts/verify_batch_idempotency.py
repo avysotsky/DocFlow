@@ -353,7 +353,8 @@ WHERE "Key" = {resume_key_literal};''',
     )
     assert manifest_incomplete == "1", manifest_incomplete
 
-    internal_prefix = f"docflow-internal:batch:{generation_id}:"
+    generation_key_id = generation_id.replace("-", "")
+    internal_prefix = f"docflow-internal:batch:{generation_key_id}:"
     checkpoint_count = run_psql(
         f'''SELECT COUNT(*)
 FROM "IntakeIdempotencyRecords"
