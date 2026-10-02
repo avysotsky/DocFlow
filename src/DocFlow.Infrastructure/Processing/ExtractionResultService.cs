@@ -59,6 +59,14 @@ public sealed class ExtractionResultService : IExtractionResultService
         else
             document.MarkNeedsReview(documentType);
 
+        _dbContext.DocumentCompletionEvents.Add(new DocumentCompletionEvent(
+            document.Id,
+            document.CustomerId,
+            document.Status,
+            document.DocumentType,
+            document.ProcessingAttempts,
+            document.ProcessedAt ?? DateTimeOffset.UtcNow));
+
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         if (validationStatus == ValidationStatus.Valid)

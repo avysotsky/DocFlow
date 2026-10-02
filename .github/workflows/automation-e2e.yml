@@ -289,6 +289,28 @@ jobs:
             "http://127.0.0.1:5080/api/documents/$failed_document_id/extraction-result")
           test "$missing_result_code" = "404"
 
+          echo "Scenario 4b: terminal transitions are persisted to the completion outbox exactly once"
+          processed_outbox=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT COUNT(*), MIN(\"ProcessingAttempts\"), MIN(COALESCE(\"DocumentType\", '')) FROM \"DocumentCompletionOutbox\" WHERE \"DocumentId\" = '$document_id' AND \"Status\" = 'Processed';")
+          test "$processed_outbox" = "1|1|supplier_quotation"
+
+          needs_review_outbox=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT COUNT(*), MIN(\"ProcessingAttempts\"), MIN(COALESCE(\"DocumentType\", '')) FROM \"DocumentCompletionOutbox\" WHERE \"DocumentId\" = '$invalid_document_id' AND \"Status\" = 'NeedsReview';")
+          test "$needs_review_outbox" = "1|1|supplier_quotation"
+
+          failed_outbox=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT COUNT(*), MIN(\"ProcessingAttempts\"), MIN(COALESCE(\"DocumentType\", '')) FROM \"DocumentCompletionOutbox\" WHERE \"DocumentId\" = '$failed_document_id' AND \"Status\" = 'Failed';")
+          test "$failed_outbox" = "1|3|"
+
           echo "Scenario 5: borderless digital quotation is processed automatically"
           borderless_upload_json=$(curl -fsS \
             "${auth_header[@]}" \

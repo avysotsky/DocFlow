@@ -125,6 +125,43 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("Documents", (string)null);
                 });
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.DocumentCompletionEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DocumentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ProcessingAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId", "OccurredAt");
+
+                    b.HasIndex("DocumentId", "Status", "ProcessingAttempts")
+                        .IsUnique();
+
+                    b.ToTable("DocumentCompletionOutbox", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.DocumentReview", b =>
                 {
                     b.Property<Guid>("Id")

@@ -1,5 +1,7 @@
 using DocFlow.Application.Abstractions;
 using DocFlow.Application.Observability;
+using DocFlow.Domain.Entities;
+using DocFlow.Domain.Enums;
 using DocFlow.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -101,6 +103,25 @@ public sealed class DocumentProcessingService : IDocumentProcessingService
             return;
 
         document.MarkFailed();
+
+        var completionEventExists = await _dbContext.DocumentCompletionEvents
+            .AnyAsync(
+                x => x.DocumentId == document.Id
+                    && x.Status == DocumentStatus.Failed
+                    && x.ProcessingAttempts == document.ProcessingAttempts,
+                cancellationToken);
+
+        if (!completionEventExists)
+        {
+            _dbContext.DocumentCompletionEvents.Add(new DocumentCompletionEvent(
+                document.Id,
+                document.CustomerId,
+                DocumentStatus.Failed,
+                document.DocumentType,
+                document.ProcessingAttempts,
+                document.LastProcessingFailureAt ?? DateTimeOffset.UtcNow));
+        }
+
         await _dbContext.SaveChangesAsync(cancellationToken);
         _metrics.RecordProcessingFailed();
     }

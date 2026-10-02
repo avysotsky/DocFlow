@@ -15,6 +15,7 @@ public sealed class DocFlowDbContext : DbContext
     public DbSet<DocumentReview> DocumentReviews => Set<DocumentReview>();
     public DbSet<IntakeIdempotencyRecord> IntakeIdempotencyRecords => Set<IntakeIdempotencyRecord>();
     public DbSet<BatchIntakeIdempotencyRecord> BatchIntakeIdempotencyRecords => Set<BatchIntakeIdempotencyRecord>();
+    public DbSet<DocumentCompletionEvent> DocumentCompletionEvents => Set<DocumentCompletionEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
