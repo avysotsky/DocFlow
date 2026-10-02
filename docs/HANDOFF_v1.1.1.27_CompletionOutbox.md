@@ -1,52 +1,34 @@
 # DocFlow — handoff v1.1.1.27 Completion Outbox
 
-Status: **ACTIVE**  
+Status: **COMPLETED**  
 Repository: `avysotsky/DocFlow`  
 Branch: `DocFlow/v_1.1.1.27_CompletionOutbox`  
 Base: `DocFlow/v_1.1.1.26_StorageKeyDeprecation`
 
-## Goal
+## Purpose
 
-Close the reliability gap before HTTP completion webhooks by persisting terminal document-completion events transactionally with the document status change.
+Create a reliable database transaction boundary for future completion notifications before adding outbound HTTP delivery.
 
-This milestone does **not** send outbound HTTP yet.
+## Implementation
 
-## Why split the milestone
-
-Sending a webhook directly from the processing worker would create an unsafe crash window:
+Implementation commit:
 
 ```text
-persist terminal status
--> process crashes
--> webhook never sent
+3a56f0dad62bf29b3dd7a3ff4de098b1e23717fe
+Persist terminal document completion events
 ```
 
-Reversing the order creates the opposite risk:
+New domain/persistence pieces:
 
 ```text
-send webhook
--> persistence fails/retries
--> duplicate or inconsistent notification
+DocumentCompletionEvent
+DocumentCompletionEventConfiguration
+DocumentCompletionOutbox table
+migration 20261002094000_AddDocumentCompletionOutbox
+DbSet<DocumentCompletionEvent>
 ```
 
-Therefore the first reliable boundary is a persisted outbox/event row written in the same EF Core `SaveChanges` as the terminal state transition.
-
-## Event-producing transitions
-
-Create one persisted completion event when a document reaches:
-
-```text
-Processed
-NeedsReview
-Failed
-```
-
-- `Processed` / `NeedsReview`: event is inserted in the same SaveChanges that persists the ExtractionResult and terminal document status.
-- `Failed`: event is inserted in the same SaveChanges that persists the final Failed status after bounded retries are exhausted.
-
-## Event snapshot
-
-Persist enough information for later delivery without needing the Document row to still exist:
+Persisted event snapshot:
 
 ```text
 Id
@@ -58,31 +40,72 @@ ProcessingAttempts
 OccurredAt
 ```
 
-Do not add a cascade FK to `Documents`. Explicit delete/retention must not erase an undelivered completion fact.
+## Transaction semantics
 
-Use a uniqueness guard for the terminal transition identity so retry/repeated enqueue does not create duplicate outbox events for the same completion transition.
+`Processed` and `NeedsReview`:
 
-## Scope boundary
+```text
+create ExtractionResult
+mark Document terminal
+add DocumentCompletionEvent
+SaveChanges once
+```
 
-Do not add:
+`Failed` after bounded retries:
 
-- request-supplied callback URLs;
-- outbound HTTP delivery;
-- arbitrary webhook destinations;
-- signing secrets;
-- RabbitMQ/Kafka;
-- distributed scheduling.
+```text
+mark Document Failed
+add DocumentCompletionEvent
+SaveChanges once
+```
 
-Those belong to the next milestone after the durable event boundary is proven.
+This removes the crash window that would exist if an HTTP notification were sent directly from the processing worker after status persistence.
+
+## Duplicate guard
+
+The database has a unique index on:
+
+```text
+DocumentId + Status + ProcessingAttempts
+```
+
+Repeated enqueue of an already completed document therefore does not create another event for the same terminal transition.
+
+A later manual reprocessing cycle after a failure can still produce a distinct completion transition because the cumulative processing-attempt count changes.
+
+## Delete/retention boundary
+
+The outbox intentionally has **no foreign key cascade to Documents**.
+
+A document may be explicitly deleted or removed by retention after completion, but the persisted completion event must remain available for future delivery.
 
 ## Validation
 
-Extend Automation E2E / PostgreSQL assertions to prove:
+Authoritative validation:
 
-- one Processed completion event for a normally processed document;
-- one NeedsReview event for invalid arithmetic;
-- one Failed event after exhausted technical retries;
-- repeated enqueue of an already completed document does not duplicate its event;
-- existing restart/review/delete/retention/idempotency regressions remain green.
+```text
+.NET CI #41 -> success (run 36991292679)
+Automation E2E #122 -> success (run 36991292541)
+```
 
-Expected CI: .NET CI + Automation E2E only.
+Automation E2E proves:
+
+- normal quotation -> exactly one `Processed` event with attempt count 1;
+- invalid arithmetic -> exactly one `NeedsReview` event with attempt count 1;
+- exhausted missing-file processing -> exactly one `Failed` event with attempt count 3;
+- repeated enqueue of the already completed quotation does not duplicate its event;
+- migration chain applies successfully;
+- restart/review/delete/retention/idempotency regressions remain green.
+
+## Explicit non-scope
+
+This milestone does not send outbound HTTP and does not add:
+
+- callback URLs in upload requests;
+- webhook destinations;
+- webhook secrets/signatures;
+- delivery attempts/backoff;
+- RabbitMQ/Kafka;
+- distributed scheduling.
+
+Those belong to the next milestone on top of this durable event source.

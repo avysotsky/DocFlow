@@ -19,6 +19,7 @@ Authenticated customer API
   -> deterministic supplier quotation/invoice extraction
   -> deterministic arithmetic validation
   -> PostgreSQL persistence
+  -> transactional terminal-completion outbox
   -> tenant-scoped inbox / human review
   -> authenticated client audit attribution for review submissions
   -> original PDF retrieval
@@ -221,6 +222,36 @@ Those document ids are re-enqueued in created order. This covers both work that 
 Completed `Processed`/`NeedsReview` documents are not re-enqueued, and `Failed` documents remain failed unless a caller explicitly requests processing again.
 
 This recovery contract is intentionally scoped to the current **single-instance MVP**. It is not a distributed queue, lease or multi-worker coordination mechanism. If DocFlow later runs multiple active application instances, introduce explicit distributed ownership/queue semantics rather than relying on startup reconciliation alone.
+
+## Completion event outbox
+
+Whenever processing reaches a terminal state, DocFlow persists a durable completion event in `DocumentCompletionOutbox`:
+
+```text
+Processed
+NeedsReview
+Failed
+```
+
+For `Processed` and `NeedsReview`, the event is inserted in the same EF Core `SaveChanges` that persists the `ExtractionResult` and terminal document status. For exhausted technical failures, the `Failed` event is inserted in the same `SaveChanges` that persists the final failed status.
+
+Each event snapshots:
+
+```text
+event id
+document id
+customer id
+terminal status
+document type
+processing-attempt count
+occurred timestamp
+```
+
+The outbox intentionally has no cascade foreign key to `Documents`. Explicit delete or retention cleanup must not erase a completion fact before a future delivery policy has handled it.
+
+A unique transition key over document, terminal status and processing-attempt count prevents repeated enqueue/retry paths from creating duplicate events for the same completion transition.
+
+This milestone establishes only the durable transaction boundary. Outbound webhook delivery, signing, destination configuration and delivery retry state are intentionally separate concerns.
 
 ## Original PDF access
 
@@ -436,6 +467,6 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, protected low-cardinality process-local operational metrics, bounded partial-success multi-PDF batch intake, persisted single-upload idempotency with physical cleanup, and persisted whole-request batch idempotency with durable per-item checkpoints.
 
-Per-tenant retention overrides, fault-injected batch-resume verification, and backward-compatible `StorageKey` deprecation are now complete. Clients can use the stable `sourceFileUrl` contract while legacy consumers continue to receive `storageKey`. A strong next customer-facing gap is completion notification: today clients must poll status/inbox to learn when processing finishes. Inspect whether a narrow tenant-configured webhook/outbox contract is justified before introducing broader messaging infrastructure.
+Per-tenant retention overrides, fault-injected batch-resume verification, backward-compatible `StorageKey` deprecation, and a transactional terminal-completion outbox are now complete. The next narrow customer-facing step is delivery of those persisted completion events to tenant-configured webhook destinations with explicit signing and bounded retry semantics; request-supplied arbitrary callback URLs remain out of scope.
 
 Production code remains private. A separate public portfolio repository may be created later.
