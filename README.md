@@ -20,6 +20,7 @@ Authenticated customer API
   -> deterministic arithmetic validation
   -> PostgreSQL persistence
   -> transactional terminal-completion outbox
+  -> signed tenant-configured webhook delivery
   -> tenant-scoped inbox / human review
   -> authenticated client audit attribution for review submissions
   -> original PDF retrieval
@@ -253,6 +254,62 @@ A unique transition key over document, terminal status and processing-attempt co
 
 This milestone establishes only the durable transaction boundary. Outbound webhook delivery, signing, destination configuration and delivery retry state are intentionally separate concerns.
 
+## Completion webhooks
+
+Terminal completion events are delivered asynchronously from the persisted `DocumentCompletionOutbox`; document processing never performs outbound HTTP inline.
+
+Webhook destinations are deployment configuration scoped by trusted `CustomerId`. Individual upload requests cannot supply callback URLs.
+
+Delivery is **at least once**. Payloads include an immutable `eventId` so receivers can deduplicate a rare duplicate caused by a process crash after receiver success but before `DeliveredAt` is persisted.
+
+Payload fields:
+
+```text
+eventId
+eventType = document.completed
+occurredAt
+documentId
+customerId
+status
+documentType
+processingAttempts
+```
+
+Requests include:
+
+```text
+X-DocFlow-Event-Id: <event id>
+X-DocFlow-Signature: sha256=<HMAC-SHA256 over exact request bytes>
+```
+
+Delivery state is persisted on the outbox row:
+
+```text
+DeliveryAttempts
+NextDeliveryAttemptAt
+LastDeliveryAttemptAt
+LastDeliveryError
+DeliveredAt
+DeliveryAbandonedAt
+```
+
+Failures use bounded exponential backoff. After the configured maximum attempts the event is marked abandoned and automatic attempts stop.
+
+Security boundaries:
+
+- production destinations require HTTPS;
+- redirects are disabled;
+- proxy use is disabled;
+- DNS is resolved inside the connection callback and the actual connected address is checked;
+- loopback/private/link-local/multicast/reserved destination ranges are blocked outside Development;
+- request timeout is bounded;
+- response bodies are not consumed;
+- secrets remain deployment configuration and are never persisted in the outbox.
+
+Development can explicitly enable HTTP/private destinations for deterministic local E2E only.
+
+The delivery worker remains within DocFlow's current **single-instance MVP** boundary. It does not provide distributed ownership across multiple active application replicas.
+
 ## Original PDF access
 
 Authenticated tenants can retrieve the original source PDF through:
@@ -467,6 +524,6 @@ CSV uses `Path,Value`; XLSX contains the same logical rows on an `Extraction Res
 
 Completed MVP milestones include automated processing, conditional OCR, real-corpus benchmarking, hard-case extraction, degraded-OCR recovery, persisted-result CSV/XLSX export, tenant-scoped document inbox, human review, API-key tenant isolation, reproducible container deployment with health/readiness checks, bounded technical-failure retries with persisted processing diagnostics, single-instance restart recovery from PostgreSQL, tenant-scoped terminal document deletion with file/database cleanup, tenant-scoped original PDF streaming with range support, opt-in automatic retention for expired terminal documents, authenticated API-client attribution for review audit records, protected low-cardinality process-local operational metrics, bounded partial-success multi-PDF batch intake, persisted single-upload idempotency with physical cleanup, and persisted whole-request batch idempotency with durable per-item checkpoints.
 
-Per-tenant retention overrides, fault-injected batch-resume verification, backward-compatible `StorageKey` deprecation, and a transactional terminal-completion outbox are now complete. The next narrow customer-facing step is delivery of those persisted completion events to tenant-configured webhook destinations with explicit signing and bounded retry semantics; request-supplied arbitrary callback URLs remain out of scope.
+Per-tenant retention overrides, fault-injected batch-resume verification, backward-compatible `StorageKey` deprecation, transactional completion outbox, and signed tenant-configured webhook delivery are now complete. The next operational gap is visibility and safe re-drive for abandoned webhook events: bounded retries stop correctly, but recovery currently requires direct database intervention.
 
 Production code remains private. A separate public portfolio repository may be created later.
