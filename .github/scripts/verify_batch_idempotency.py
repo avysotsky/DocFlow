@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -107,6 +108,42 @@ def count_filename(base_url: str, api_key: str, file_name: str) -> int:
         for item in items
         if isinstance(item, dict) and item.get("originalFileName") == file_name
     )
+
+
+def run_psql(sql: str, *, tuples_only: bool = False) -> str:
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "-e",
+        "PGPASSWORD=postgres",
+        "postgres:16",
+        "psql",
+        "-h",
+        "127.0.0.1",
+        "-U",
+        "postgres",
+        "-d",
+        "docflow",
+        "-v",
+        "ON_ERROR_STOP=1",
+    ]
+    if tuples_only:
+        command.append("-At")
+    command.extend(["-c", sql])
+    result = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def wait_for_terminal(base_url: str, api_key: str, document_id: str) -> str:
@@ -225,6 +262,191 @@ def verify(base_url: str, api_key: str, other_api_key: str) -> None:
     assert count_filename(base_url, api_key, concurrent_name) == 1
 
     concurrent_accepted_id = next(iter(accepted_ids))
+
+    resume_suffix = uuid.uuid4().hex
+    resume_names = [
+        f"batch-resume-{resume_suffix}-0.pdf",
+        f"batch-resume-{resume_suffix}-1.txt",
+        f"batch-resume-{resume_suffix}-2-fault.pdf",
+        f"batch-resume-{resume_suffix}-3.pdf",
+    ]
+    resume_files = [
+        (resume_names[0], "application/pdf", valid_pdf),
+        (resume_names[1], "text/plain", invalid_payload),
+        (resume_names[2], "application/pdf", valid_pdf),
+        (resume_names[3], "application/pdf", valid_pdf),
+    ]
+    resume_key = f"batch-resume-{resume_suffix}"
+    trigger_function = "docflow_e2e_batch_resume_fail"
+    trigger_name = "docflow_e2e_batch_resume_fail_trigger"
+    fault_name_literal = sql_literal(resume_names[2])
+
+    run_psql(
+        f'''\
+DROP TRIGGER IF EXISTS {trigger_name} ON "Documents";
+DROP FUNCTION IF EXISTS {trigger_function}();
+CREATE FUNCTION {trigger_function}() RETURNS trigger
+LANGUAGE plpgsql
+AS $
+BEGIN
+    IF NEW."OriginalFileName" = {fault_name_literal} THEN
+        RAISE EXCEPTION 'docflow e2e injected document persistence failure';
+    END IF;
+    RETURN NEW;
+END;
+$;
+CREATE TRIGGER {trigger_name}
+BEFORE INSERT ON "Documents"
+FOR EACH ROW EXECUTE FUNCTION {trigger_function}();
+'''
+    )
+
+    try:
+        first_resume_status, first_resume, first_resume_headers = request_batch(
+            base_url,
+            api_key,
+            resume_key,
+            resume_files,
+        )
+        assert first_resume_status == 200 and isinstance(first_resume, dict), (
+            first_resume_status,
+            first_resume,
+        )
+        assert first_resume_headers.get("idempotency-replayed") is None, first_resume_headers
+        assert first_resume["totalCount"] == 4, first_resume
+        assert first_resume["acceptedCount"] == 2, first_resume
+        assert first_resume["rejectedCount"] == 1, first_resume
+        assert first_resume["failedCount"] == 1, first_resume
+        assert [item["outcome"] for item in first_resume["items"]] == [
+            "Accepted",
+            "Rejected",
+            "Failed",
+            "Accepted",
+        ], first_resume
+        assert first_resume["items"][0]["documentId"], first_resume
+        assert first_resume["items"][1]["documentId"] is None, first_resume
+        assert first_resume["items"][2]["documentId"] is None, first_resume
+        assert first_resume["items"][3]["documentId"], first_resume
+        assert first_resume["items"][2]["error"] == "The document could not be persisted.", first_resume
+    finally:
+        run_psql(
+            f'''\
+DROP TRIGGER IF EXISTS {trigger_name} ON "Documents";
+DROP FUNCTION IF EXISTS {trigger_function}();
+'''
+        )
+
+    resume_key_literal = sql_literal(resume_key)
+    generation_id = run_psql(
+        f'''SELECT "GenerationId"::text
+FROM "BatchIntakeIdempotencyRecords"
+WHERE "Key" = {resume_key_literal};''',
+        tuples_only=True,
+    )
+    assert generation_id, generation_id
+
+    manifest_incomplete = run_psql(
+        f'''SELECT CASE WHEN "ResponseJson" IS NULL THEN 1 ELSE 0 END
+FROM "BatchIntakeIdempotencyRecords"
+WHERE "Key" = {resume_key_literal};''',
+        tuples_only=True,
+    )
+    assert manifest_incomplete == "1", manifest_incomplete
+
+    internal_prefix = f"docflow-internal:batch:{generation_id}:"
+    checkpoint_count = run_psql(
+        f'''SELECT COUNT(*)
+FROM "IntakeIdempotencyRecords"
+WHERE "Key" LIKE {sql_literal(internal_prefix + "%")};''',
+        tuples_only=True,
+    )
+    assert checkpoint_count == "3", checkpoint_count
+
+    failed_checkpoint_count = run_psql(
+        f'''SELECT COUNT(*)
+FROM "IntakeIdempotencyRecords"
+WHERE "Key" = {sql_literal(internal_prefix + "2")};''',
+        tuples_only=True,
+    )
+    assert failed_checkpoint_count == "0", failed_checkpoint_count
+
+    second_resume_status, second_resume, second_resume_headers = request_batch(
+        base_url,
+        api_key,
+        resume_key,
+        resume_files,
+    )
+    assert second_resume_status == 200 and isinstance(second_resume, dict), (
+        second_resume_status,
+        second_resume,
+    )
+    assert second_resume_headers.get("idempotency-replayed") is None, second_resume_headers
+    assert second_resume["acceptedCount"] == 3, second_resume
+    assert second_resume["rejectedCount"] == 1, second_resume
+    assert second_resume["failedCount"] == 0, second_resume
+    assert second_resume["items"][0] == first_resume["items"][0], (
+        second_resume,
+        first_resume,
+    )
+    assert second_resume["items"][1] == first_resume["items"][1], (
+        second_resume,
+        first_resume,
+    )
+    assert second_resume["items"][3] == first_resume["items"][3], (
+        second_resume,
+        first_resume,
+    )
+    assert second_resume["items"][2]["outcome"] == "Accepted", second_resume
+    assert second_resume["items"][2]["documentId"], second_resume
+
+    checkpoint_count_after_resume = run_psql(
+        f'''SELECT COUNT(*)
+FROM "IntakeIdempotencyRecords"
+WHERE "Key" LIKE {sql_literal(internal_prefix + "%")};''',
+        tuples_only=True,
+    )
+    assert checkpoint_count_after_resume == "4", checkpoint_count_after_resume
+
+    manifest_complete = run_psql(
+        f'''SELECT CASE WHEN "ResponseJson" IS NOT NULL THEN 1 ELSE 0 END
+FROM "BatchIntakeIdempotencyRecords"
+WHERE "Key" = {resume_key_literal};''',
+        tuples_only=True,
+    )
+    assert manifest_complete == "1", manifest_complete
+
+    third_resume_status, third_resume, third_resume_headers = request_batch(
+        base_url,
+        api_key,
+        resume_key,
+        resume_files,
+    )
+    assert third_resume_status == 200 and third_resume == second_resume, (
+        third_resume_status,
+        third_resume,
+        second_resume,
+    )
+    assert third_resume_headers.get("idempotency-replayed") == "true", third_resume_headers
+
+    document_count = run_psql(
+        f'''SELECT COUNT(*)
+FROM "Documents"
+WHERE "OriginalFileName" IN (
+    {sql_literal(resume_names[0])},
+    {sql_literal(resume_names[2])},
+    {sql_literal(resume_names[3])}
+);''',
+        tuples_only=True,
+    )
+    assert document_count == "3", document_count
+
+    resume_document_ids = [
+        second_resume["items"][0]["documentId"],
+        second_resume["items"][2]["documentId"],
+        second_resume["items"][3]["documentId"],
+    ]
+    assert all(resume_document_ids), second_resume
+
     assert wait_for_terminal(base_url, api_key, str(accepted_id)) == "Processed"
     assert wait_for_terminal(base_url, other_api_key, str(other_accepted_id)) == "Processed"
     assert wait_for_terminal(base_url, api_key, str(concurrent_accepted_id)) == "Processed"
