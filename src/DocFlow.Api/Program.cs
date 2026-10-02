@@ -3,6 +3,7 @@ using DocFlow.Api.BackgroundServices;
 using DocFlow.Api.Documents;
 using DocFlow.Api.Middleware;
 using DocFlow.Api.Observability;
+using DocFlow.Api.OpenApi;
 using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
 using DocFlow.Application.Observability;
@@ -18,7 +19,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+    options.SchemaFilter<DocumentContractSchemaFilter>());
 builder.Services.AddHttpContextAccessor();
 
 var apiKeyOptions = builder.Services

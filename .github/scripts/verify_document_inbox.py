@@ -412,6 +412,48 @@ def main() -> None:
     assert args.failed_document_id in ids
     assert args.needs_review_document_id in ids
 
+    detail_status, invoice_detail = request_json(
+        f"{args.base_url.rstrip('/')}/api/documents/{args.invoice_document_id}",
+        args.api_key,
+    )
+    assert detail_status == 200 and isinstance(invoice_detail, dict), (
+        detail_status,
+        invoice_detail,
+    )
+    assert isinstance(invoice_detail.get("storageKey"), str) and invoice_detail["storageKey"], invoice_detail
+    expected_source_file_url = f"/api/documents/{args.invoice_document_id}/file"
+    assert invoice_detail.get("sourceFileUrl") == expected_source_file_url, invoice_detail
+
+    source_file_status, _ = request_json(
+        f"{args.base_url.rstrip('/')}{expected_source_file_url}",
+        args.api_key,
+    )
+    assert source_file_status == 200, source_file_status
+
+    swagger_status, swagger = request_json(
+        f"{args.base_url.rstrip('/')}/swagger/v1/swagger.json",
+        None,
+    )
+    assert swagger_status == 200 and isinstance(swagger, dict), (
+        swagger_status,
+        swagger,
+    )
+    schemas = swagger.get("components", {}).get("schemas", {})
+    document_schemas = [
+        schema
+        for schema in schemas.values()
+        if isinstance(schema, dict)
+        and isinstance(schema.get("properties"), dict)
+        and "storageKey" in schema["properties"]
+        and "sourceFileUrl" in schema["properties"]
+        and "originalFileName" in schema["properties"]
+    ]
+    assert len(document_schemas) == 1, document_schemas
+    document_properties = document_schemas[0]["properties"]
+    assert document_properties["storageKey"].get("deprecated") is True, document_properties["storageKey"]
+    assert "Deprecated internal storage locator" in document_properties["storageKey"].get("description", ""), document_properties["storageKey"]
+    assert document_properties["sourceFileUrl"].get("type") == "string", document_properties["sourceFileUrl"]
+
     invoice = next(item for item in items if item["id"] == args.invoice_document_id)
     assert invoice["documentType"] == "supplier_invoice", invoice
     assert invoice["documentStatus"] == "Processed", invoice

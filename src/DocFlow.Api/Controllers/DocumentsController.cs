@@ -165,7 +165,8 @@ public sealed class DocumentsController : ControllerBase
         var document = await _dbContext.Documents
             .AsNoTracking()
             .Where(x => x.Id == id && x.CustomerId == customerId)
-            .Select(x => new GetDocumentResponse(
+            .Select(x => new
+            {
                 x.Id,
                 x.CustomerId,
                 x.OriginalFileName,
@@ -173,16 +174,29 @@ public sealed class DocumentsController : ControllerBase
                 x.StorageKey,
                 x.Size,
                 x.DocumentType,
-                x.Status.ToString(),
+                x.Status,
                 x.CreatedAt,
                 x.ProcessedAt,
-                x.DeleteAt))
+                x.DeleteAt
+            })
             .SingleOrDefaultAsync(cancellationToken);
 
         if (document is null)
             return NotFound();
 
-        return Ok(document);
+        return Ok(new GetDocumentResponse(
+            document.Id,
+            document.CustomerId,
+            document.OriginalFileName,
+            document.ContentType,
+            document.StorageKey,
+            $"/api/documents/{document.Id}/file",
+            document.Size,
+            document.DocumentType,
+            document.Status.ToString(),
+            document.CreatedAt,
+            document.ProcessedAt,
+            document.DeleteAt));
     }
 
     [HttpGet("{id:guid}/extraction-result")]
@@ -547,6 +561,7 @@ public sealed class DocumentsController : ControllerBase
         string OriginalFileName,
         string ContentType,
         string StorageKey,
+        string SourceFileUrl,
         long Size,
         string? DocumentType,
         string Status,
