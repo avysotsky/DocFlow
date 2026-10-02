@@ -3,6 +3,7 @@ using DocFlow.Api.BackgroundServices;
 using DocFlow.Api.Documents;
 using DocFlow.Api.Middleware;
 using DocFlow.Api.Observability;
+using DocFlow.Api.Notifications;
 using DocFlow.Api.OpenApi;
 using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
@@ -113,6 +114,68 @@ builder.Services
         "Operations metrics ApiKey must not exceed 512 characters.")
     .ValidateOnStart();
 
+var webhookOptions = builder.Services
+    .AddOptions<WebhookDeliveryOptions>()
+    .Bind(builder.Configuration.GetSection(WebhookDeliveryOptions.ConfigurationSection))
+    .Validate(options => options.PollIntervalSeconds is >= 1 and <= 3600, "Webhook PollIntervalSeconds must be between 1 and 3600.")
+    .Validate(options => options.RequestTimeoutSeconds is >= 1 and <= 60, "Webhook RequestTimeoutSeconds must be between 1 and 60.")
+    .Validate(options => options.MaxAttempts is >= 1 and <= 10, "Webhook MaxAttempts must be between 1 and 10.")
+    .Validate(options => options.BaseRetryDelaySeconds is >= 1 and <= 3600, "Webhook BaseRetryDelaySeconds must be between 1 and 3600.")
+    .Validate(options => options.MaxRetryDelaySeconds is >= 1 and <= 86400 && options.MaxRetryDelaySeconds >= options.BaseRetryDelaySeconds, "Webhook MaxRetryDelaySeconds must be between BaseRetryDelaySeconds and 86400.")
+    .Validate(options => options.BatchSize is >= 1 and <= 100, "Webhook BatchSize must be between 1 and 100.")
+    .Validate(options => options.Tenants.All(tenant => tenant.CustomerId != Guid.Empty), "Every webhook tenant must have a non-empty CustomerId.")
+    .Validate(options => options.Tenants.Select(tenant => tenant.CustomerId).Distinct().Count() == options.Tenants.Count, "Webhook tenant CustomerIds must be unique.")
+    .Validate(
+        options => options.Tenants.All(tenant =>
+            !string.IsNullOrWhiteSpace(tenant.Secret)
+            && tenant.Secret.Length <= 512
+            && tenant.Secret.Length >= (builder.Environment.IsDevelopment() ? 16 : 32)),
+        "Webhook secrets must satisfy the environment-specific length requirement.")
+    .Validate(
+        options => options.Tenants.All(tenant =>
+        {
+            if (string.IsNullOrWhiteSpace(tenant.Url)
+                || tenant.Url.Length > 2048
+                || !Uri.TryCreate(tenant.Url, UriKind.Absolute, out var uri)
+                || !string.IsNullOrEmpty(uri.UserInfo)
+                || !string.IsNullOrEmpty(uri.Fragment))
+            {
+                return false;
+            }
+
+            if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return builder.Environment.IsDevelopment()
+                && options.DevelopmentAllowInsecureHttp
+                && uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
+        }),
+        "Webhook URLs must be valid absolute HTTPS URLs; Development may explicitly allow HTTP.")
+    .Validate(
+        options => options.Tenants.All(tenant =>
+        {
+            if (!Uri.TryCreate(tenant.Url, UriKind.Absolute, out var uri)
+                || !System.Net.IPAddress.TryParse(uri.Host, out var address))
+            {
+                return true;
+            }
+
+            return WebhookDestinationSecurity.IsPublicAddress(address)
+                || (builder.Environment.IsDevelopment()
+                    && options.DevelopmentAllowPrivateNetworks);
+        }),
+        "Webhook IP-literal destinations must use permitted network ranges.");
+
+if (!builder.Environment.IsDevelopment())
+{
+    webhookOptions.Validate(
+        options => !options.DevelopmentAllowInsecureHttp
+            && !options.DevelopmentAllowPrivateNetworks,
+        "Webhook DevelopmentAllow* options cannot be enabled outside Development.");
+}
+
+webhookOptions.ValidateOnStart();
+
 builder.Services
     .AddAuthentication(ApiKeyAuthenticationDefaults.Scheme)
     .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
@@ -143,6 +206,7 @@ builder.Services.AddHostedService<DocumentProcessingRecoveryHostedService>();
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 builder.Services.AddHostedService<DocumentRetentionHostedService>();
 builder.Services.AddHostedService<IntakeIdempotencyCleanupHostedService>();
+builder.Services.AddHostedService<WebhookDeliveryHostedService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
 if (!Path.IsPathRooted(storageRoot))

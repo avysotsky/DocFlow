@@ -27,6 +27,14 @@ public sealed class DocumentCompletionEventConfiguration
         builder.Property(x => x.OccurredAt)
             .IsRequired();
 
+        builder.Property(x => x.DeliveryAttempts)
+            .IsRequired();
+
+        builder.Property(x => x.LastDeliveryError)
+            .HasMaxLength(DocumentCompletionEvent.MaxDeliveryErrorLength);
+
+        builder.HasIndex(x => x.NextDeliveryAttemptAt);
+
         builder.HasIndex(x => new { x.DocumentId, x.Status, x.ProcessingAttempts })
             .IsUnique();
 
