@@ -5,7 +5,9 @@ public enum ExtractionResultExportFormat
     Csv,
     Xlsx,
     InvoiceCsv,
-    InvoiceXlsx
+    InvoiceXlsx,
+    PurchaseOrderCsv,
+    PurchaseOrderXlsx
 }
 
 public sealed record ExtractionResultExportFile(
