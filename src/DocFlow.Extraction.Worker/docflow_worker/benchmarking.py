@@ -53,7 +53,7 @@ class BenchmarkMetadata(BaseModel):
 
 
 class BenchmarkExpectation(BaseModel):
-    document_type: Literal["supplier_quotation", "supplier_invoice"]
+    document_type: Literal["supplier_quotation", "supplier_invoice", "purchase_order"]
     validation_status: Literal["valid", "invalid", "incomplete"] | None = None
     fields: dict[str, Any] = Field(default_factory=dict)
 
@@ -63,7 +63,7 @@ class BenchmarkCase(BaseModel):
     file: str
     sha256: str | None = None
     metadata: BenchmarkMetadata = Field(default_factory=BenchmarkMetadata)
-    document_type: Literal["auto", "supplier_quotation", "supplier_invoice"] = "auto"
+    document_type: Literal["auto", "supplier_quotation", "supplier_invoice", "purchase_order"] = "auto"
     expected: BenchmarkExpectation
 
     @field_validator("id", "file")
