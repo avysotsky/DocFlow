@@ -545,6 +545,7 @@ jobs:
             --api-key "$api_key" \
             --document-id "$invoice_document_id" \
             --document-without-result-id "$failed_document_id"
+            --purchase-order-document-id "$po_document_id"
 
           echo "Scenario 7b: duplicate supplier invoice is flagged for human review"
           duplicate_upload_json=$(curl -fsS \
