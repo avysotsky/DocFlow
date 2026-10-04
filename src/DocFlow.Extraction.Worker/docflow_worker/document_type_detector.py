@@ -1,12 +1,31 @@
 from docflow_worker.models import DocumentContent
 
 
-SUPPORTED_DOCUMENT_TYPES = ("supplier_quotation", "supplier_invoice")
+SUPPORTED_DOCUMENT_TYPES = ("supplier_quotation", "supplier_invoice", "purchase_order")
 
 
 def detect_document_type(content: DocumentContent) -> str:
     """Detect the supported supplier document type using deterministic text markers."""
     text = content.text.lower()
+
+    purchase_order_markers = (
+        "purchase order number",
+        "order number and date must be quoted on invoices",
+        "order date",
+        "supplier name and address",
+        "delivery address",
+        "total price (excl. vat)",
+        "order total",
+    )
+    purchase_order_score = sum(marker in text for marker in purchase_order_markers)
+    has_purchase_order_title = (
+        "\npurchase order\n" in f"\n{text}\n"
+        or text.lstrip().startswith("purchase order")
+        or text.lstrip().startswith("purchase order number")
+        or text.lstrip().startswith("purchase order\n")
+    )
+    if has_purchase_order_title and purchase_order_score >= 2:
+        return "purchase_order"
 
     if "invaice" in text and ("invoice total" in text or "total net amount" in text):
         return "supplier_invoice"
