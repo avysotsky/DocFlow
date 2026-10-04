@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DocFlow.Application.Abstractions;
 using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
@@ -30,6 +31,7 @@ public sealed class ExtractionResultExportService : IExtractionResultExportServi
                 select new
                 {
                     extractionResult.StructuredDataJson,
+                    extractionResult.ValidationStatus,
                     document.OriginalFileName,
                     Review = review
                 })
@@ -41,9 +43,31 @@ public sealed class ExtractionResultExportService : IExtractionResultExportServi
         var effectiveStructuredDataJson = ReviewedStructuredDataComposer.Compose(
             source.StructuredDataJson,
             source.Review);
-        var rows = StructuredDataTabularExporter.Flatten(effectiveStructuredDataJson);
         var safeBaseName = BuildSafeBaseName(source.OriginalFileName, documentId);
 
+        if (format is ExtractionResultExportFormat.InvoiceCsv
+            or ExtractionResultExportFormat.InvoiceXlsx)
+        {
+            var invoice = SupplierInvoiceBusinessExporter.Parse(
+                effectiveStructuredDataJson,
+                source.ValidationStatus.ToString(),
+                source.Review is not null);
+
+            return format switch
+            {
+                ExtractionResultExportFormat.InvoiceCsv => new ExtractionResultExportFile(
+                    SupplierInvoiceBusinessExporter.ToCsv(invoice),
+                    "text/csv; charset=utf-8",
+                    $"{safeBaseName}-invoice.csv"),
+                ExtractionResultExportFormat.InvoiceXlsx => new ExtractionResultExportFile(
+                    SupplierInvoiceBusinessExporter.ToXlsx(invoice),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    $"{safeBaseName}-invoice.xlsx"),
+                _ => throw new UnreachableException()
+            };
+        }
+
+        var rows = StructuredDataTabularExporter.Flatten(effectiveStructuredDataJson);
         return format switch
         {
             ExtractionResultExportFormat.Csv => new ExtractionResultExportFile(
