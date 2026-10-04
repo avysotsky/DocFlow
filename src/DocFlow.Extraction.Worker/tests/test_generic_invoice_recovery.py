@@ -465,3 +465,36 @@ Total
 
     assert totals["vat_amount"] != Decimal("392232306")
     assert totals["total"] == Decimal("11.04")
+
+
+def test_ocr_invoice_number_recovery_does_not_confuse_vat_registration_number() -> None:
+    content = _content(
+        """
+TAX                           Invoice Date       HCC Solutions Co Ltd
+                              INVOICE            22 Jul 2025
+Kingsthorpe Library           Invoice Number     Northampton
+                              INV-2180           Northamptonshire
+VAT Number                    NN5 6TU
+                              462000151          UNITED KINGDOM
+
+Description Quantity Unit Price VAT Amount GBP
+Cleaning service 1.00 782.88 20% 782.88
+Subtotal 782.88
+TOTAL VAT 20% 156.57
+TOTAL GBP 939.45
+Due Date: 29 Jul 2025
+Please note Payment is required either on the day or 7 days after the invoice date.
+VAT Number 462000151
+"""
+    )
+    invoice = SupplierInvoiceData(
+        invoice_number="462000151",
+        subtotal=Decimal("782.88"),
+        vat_rate=Decimal("20"),
+        vat_amount=Decimal("156.57"),
+        total=Decimal("939.45"),
+    )
+
+    apply_generic_invoice_recovery(content, invoice)
+
+    assert invoice.invoice_number == "INV-2180"
