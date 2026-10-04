@@ -123,6 +123,7 @@ _DATE_FORMATS = (
 
 _TERMINATOR_PREFIXES = (
     "subtotal",
+    "sub total",
     "total",
     "vat total",
     "vat rate",
@@ -651,7 +652,7 @@ def _recover_vertical_wiltshire_items(
     if start is None:
         return []
 
-    end = min(len(lines), start + 12)
+    end = min(len(lines), start + 10)
     section = _vertical_section(lines, end)
     if not section:
         return []
@@ -842,6 +843,11 @@ def _recover_vertical_microsoft_items(
             index
             for index in range(start + 1, min(len(lines), start + 20))
             if "tax line indicator" in normalized[index]
+            or (
+                normalized[index] == "indicator"
+                and index > start
+                and normalized[index - 1] == "tax line"
+            )
         ),
         None,
     )
