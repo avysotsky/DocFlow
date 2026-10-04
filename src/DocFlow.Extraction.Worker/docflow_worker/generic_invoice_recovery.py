@@ -363,10 +363,10 @@ def _extract_invoice_identifier(text: str) -> str | None:
                 if numeric:
                     return numeric[-1]
 
-        if normalized == "invoice":
+        if normalized == "invoice" or normalized.endswith(" invoice"):
             for candidate in lines[index + 1 : index + 4]:
-                match = re.match(
-                    r"^number\s*[:#]?\s*(?P<value>[A-Z0-9._/-]{3,})$",
+                match = re.search(
+                    r"\bnumber\s*[:#]?\s*(?P<value>[A-Z0-9._/-]{3,})\b",
                     candidate.strip(),
                     flags=re.IGNORECASE,
                 )
@@ -620,6 +620,7 @@ def _recover_vertical_items(content: DocumentContent) -> list[SupplierInvoiceIte
         lines = [line.strip() for line in page.text.splitlines() if line.strip()]
         normalized = [_normalize(line) for line in lines]
 
+        recovered.extend(_recover_quantity_description_net_vat_items(lines, normalized))
         recovered.extend(_recover_bilingual_net_price_items(lines, normalized))
         recovered.extend(_recover_qty_description_rate_total_items(lines, normalized))
         recovered.extend(_recover_vertical_quickbooks_items(lines, normalized))
@@ -643,6 +644,78 @@ def _recover_vertical_items(content: DocumentContent) -> list[SupplierInvoiceIte
         seen.add(key)
         unique.append(item)
     return unique
+
+
+def _recover_quantity_description_net_vat_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    header_end: int | None = None
+    for index in range(len(lines)):
+        window = " ".join(normalized[index : index + 2])
+        if (
+            "quantity" in window
+            and "description" in window
+            and "unit" in window
+            and "net" in window
+            and "vat" in window
+        ):
+            header_end = min(index + 1, len(lines) - 1)
+            break
+
+    if header_end is None:
+        return []
+
+    items: list[SupplierInvoiceItem] = []
+    for line in lines[header_end + 1 :]:
+        normalized_line = _normalize(line)
+        if _is_terminator(line):
+            break
+        if any(
+            normalized_line.startswith(prefix)
+            for prefix in _CONTINUATION_EXCLUSIONS
+        ):
+            break
+
+        if re.fullmatch(r"\d{4}", line.strip()) and items:
+            items[-1].description = _clean_description(
+                f"{items[-1].description} {line.strip()}"
+            )
+            continue
+
+        cells = _split_columns(line)
+        numeric = _numeric_cells(cells)
+        if len(numeric) < 5:
+            continue
+
+        quantity_index, quantity, _, _ = numeric[0]
+        unit_price_index, unit_price, _, _ = numeric[1]
+        _, line_total, _, _ = numeric[2]
+
+        if quantity <= 0 or _money(quantity * unit_price) != _money(line_total):
+            continue
+
+        description = _clean_description(
+            " ".join(
+                cell
+                for cell in cells[quantity_index + 1 : unit_price_index]
+                if re.search(r"[A-Za-z]", cell)
+            )
+        )
+        if not description:
+            continue
+
+        items.append(
+            SupplierInvoiceItem(
+                sku=None,
+                description=description,
+                quantity=quantity,
+                unit_price=unit_price,
+                line_total=line_total,
+            )
+        )
+
+    return items
 
 
 def _recover_bilingual_net_price_items(
