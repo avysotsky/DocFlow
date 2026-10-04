@@ -120,6 +120,8 @@ def parse_business_csv(payload: bytes) -> list[dict[str, str]]:
         "VATRate",
         "VATAmount",
         "Total",
+        "DuplicateStatus",
+        "DuplicateOfDocumentId",
         "ValidationStatus",
         "ReviewStatus",
     ]
@@ -211,6 +213,8 @@ def assert_business_export(
     assert first["VATRate"] == "20", first
     assert first["VATAmount"] == "291.40", first
     assert first["Total"] == "1748.40", first
+    assert first["DuplicateStatus"] == "clear", first
+    assert first["DuplicateOfDocumentId"] == "", first
     assert first["ValidationStatus"] == "Valid", first
     assert first["ReviewStatus"] == "NotReviewed", first
 
@@ -223,6 +227,8 @@ def assert_business_export(
         assert summary["Subtotal"] == "1457.00", summary
         assert summary["VAT Amount"] == "291.40", summary
         assert summary["Total"] == "1748.40", summary
+        assert summary["Duplicate Status"] == "clear", summary
+        assert summary["Duplicate Of Document Id"] == "", summary
         assert summary["Validation Status"] == "Valid", summary
         assert summary["Review Status"] == "NotReviewed", summary
 
@@ -306,6 +312,8 @@ def main() -> None:
                 "VATRate": business_summary["VAT Rate"],
                 "VATAmount": business_summary["VAT Amount"],
                 "Total": business_summary["Total"],
+                "DuplicateStatus": business_summary["Duplicate Status"],
+                "DuplicateOfDocumentId": business_summary["Duplicate Of Document Id"],
                 "ValidationStatus": business_summary["Validation Status"],
                 "ReviewStatus": business_summary["Review Status"],
                 "Supplier": business_summary["Supplier"],
