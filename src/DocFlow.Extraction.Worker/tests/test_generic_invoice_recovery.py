@@ -38,7 +38,7 @@ Description                     Quantity              Rate               Amount
 Sites                           1                     1,295.38           1,295.38
 Administrators                  3                     368.13             1,104.39
 Committees- No Charge           15                    0.00                0.00
-User (Board Members/Executives) 69                    368.13             25,400.97
+User (Board Members/Executives)  69                    368.13             25,400.97
 Subtotal                        27,800.74
 VAT (20%)                       5,560.15
 Total                           33,360.89
