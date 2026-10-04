@@ -617,7 +617,20 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
         lines = [line.rstrip() for line in content.text.splitlines() if line.strip()]
         header_lines = lines[:100]
 
-        # Prefer explicit multi-column supplier headers near the top of the PO.
+        # Same-line forms such as Supplier: Help Scout PBC. Check these first
+        # because PDF column spacing may otherwise split the value into a second cell.
+        for line in header_lines:
+            match = re.match(
+                r"^\s*(?:supplier|to)[ \t]*:[ \t]*(?P<value>.+?)\s*$",
+                line,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                value = cls._clean_supplier_name(match.group("value"))
+                if value:
+                    return value
+
+        # Multi-column supplier headers used by UKHSA/PHE templates.
         for index, line in enumerate(header_lines):
             cells = [
                 cell.strip()
@@ -658,18 +671,6 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                 ):
                     break
                 return cls._clean_supplier_name(candidate)
-
-        # Same-line forms such as Supplier: Help Scout PBC.
-        for line in header_lines:
-            match = re.match(
-                r"^\s*(?:supplier|to)[ \t]*:[ \t]*(?P<value>.+?)\s*$",
-                line,
-                flags=re.IGNORECASE,
-            )
-            if match:
-                value = cls._clean_supplier_name(match.group("value"))
-                if value:
-                    return value
 
         # Standalone To: label followed by supplier on the next line.
         for index, line in enumerate(header_lines):
