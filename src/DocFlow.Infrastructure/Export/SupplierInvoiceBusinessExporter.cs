@@ -17,6 +17,8 @@ internal sealed record SupplierInvoiceBusinessExport(
     string VatRate,
     string VatAmount,
     string Total,
+    string DuplicateStatus,
+    string DuplicateOfDocumentId,
     string ValidationStatus,
     string ReviewStatus,
     IReadOnlyList<SupplierInvoiceBusinessLine> Items);
@@ -57,6 +59,8 @@ internal static class SupplierInvoiceBusinessExporter
         "VATRate",
         "VATAmount",
         "Total",
+        "DuplicateStatus",
+        "DuplicateOfDocumentId",
         "ValidationStatus",
         "ReviewStatus"
     ];
@@ -113,6 +117,17 @@ internal static class SupplierInvoiceBusinessExporter
             }
         }
 
+        var duplicateStatus = string.Empty;
+        var duplicateOfDocumentId = string.Empty;
+        if (root.TryGetProperty("business_checks", out var businessChecks)
+            && businessChecks.ValueKind == JsonValueKind.Object
+            && businessChecks.TryGetProperty("duplicate_check", out var duplicateCheck)
+            && duplicateCheck.ValueKind == JsonValueKind.Object)
+        {
+            duplicateStatus = Read(duplicateCheck, "status");
+            duplicateOfDocumentId = Read(duplicateCheck, "duplicate_of_document_id");
+        }
+
         return new SupplierInvoiceBusinessExport(
             Read(data, "supplier_name"),
             Read(data, "invoice_number"),
@@ -125,6 +140,8 @@ internal static class SupplierInvoiceBusinessExporter
             Read(data, "vat_rate"),
             Read(data, "vat_amount"),
             Read(data, "total"),
+            duplicateStatus,
+            duplicateOfDocumentId,
             validationStatus,
             hasHumanReview ? "Reviewed" : "NotReviewed",
             items);
@@ -203,6 +220,8 @@ internal static class SupplierInvoiceBusinessExporter
             invoice.VatRate,
             invoice.VatAmount,
             invoice.Total,
+            invoice.DuplicateStatus,
+            invoice.DuplicateOfDocumentId,
             invoice.ValidationStatus,
             invoice.ReviewStatus
         ];
@@ -378,6 +397,8 @@ internal static class SupplierInvoiceBusinessExporter
             ("VAT Rate", invoice.VatRate),
             ("VAT Amount", invoice.VatAmount),
             ("Total", invoice.Total),
+            ("Duplicate Status", invoice.DuplicateStatus),
+            ("Duplicate Of Document Id", invoice.DuplicateOfDocumentId),
             ("Validation Status", invoice.ValidationStatus),
             ("Review Status", invoice.ReviewStatus)
         };
