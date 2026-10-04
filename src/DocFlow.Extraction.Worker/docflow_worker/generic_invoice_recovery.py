@@ -345,23 +345,28 @@ def _extract_invoice_identifier(text: str) -> str | None:
     for index, line in enumerate(lines):
         normalized = _normalize(line)
 
-        if "date" in normalized and "invoice" in normalized:
-            for candidate in lines[index + 1 : index + 3]:
+        if (
+            "date" in normalized
+            and "invoice" in normalized
+            and not any(
+                marker in normalized
+                for marker in ("payment", "required", "due", "after")
+            )
+        ):
+            candidates = lines[index + 1 : index + 6]
+            for candidate in candidates:
                 prefixed = re.findall(
                     r"\b[A-Z]{2,}[A-Z0-9._/-]*\d[A-Z0-9._/-]*\b",
                     candidate,
                     flags=re.IGNORECASE,
                 )
                 invoice_prefixed = [
-                    value for value in prefixed
+                    value
+                    for value in prefixed
                     if value.upper().startswith("INV")
                 ]
                 if invoice_prefixed:
                     return _clean_identifier(invoice_prefixed[-1])
-
-                numeric = re.findall(r"\b\d{5,}\b", candidate)
-                if numeric:
-                    return numeric[-1]
 
         if normalized == "invoice" or normalized.endswith(" invoice"):
             for candidate in lines[index + 1 : index + 4]:
