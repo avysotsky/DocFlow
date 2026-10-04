@@ -13,6 +13,7 @@ on:
       - 'src/DocFlow.Extraction.Worker/**'
       - '.github/scripts/generate_supplier_quotation_pdf.py'
       - '.github/scripts/generate_supplier_invoice_pdf.py'
+      - '.github/scripts/generate_purchase_order_pdf.py'
       - '.github/scripts/verify_batch_idempotency.py'
       - '.github/scripts/verify_document_export.py'
       - '.github/scripts/verify_document_inbox.py'
@@ -84,6 +85,8 @@ jobs:
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/invalid-supplier-quotation.pdf 1748.42
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/borderless-supplier-quotation.pdf --borderless
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/supplier-invoice.pdf
+          python .github/scripts/generate_purchase_order_pdf.py /tmp/purchase-order.pdf
+          python .github/scripts/generate_purchase_order_pdf.py /tmp/purchase-order-mismatch.pdf --mismatch-first-price
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/retention-primary-invoice.pdf --invoice-number INV-800001
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/retention-other-invoice.pdf --invoice-number INV-800002
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/restart-uploaded-invoice.pdf --invoice-number INV-900001
@@ -466,6 +469,74 @@ jobs:
             and .structuredData.data.vat_amount == "291.40"
             and .structuredData.data.total == "1748.40"
             and (.structuredData.data.items | length) == 5
+          ' >/dev/null
+
+          echo "Scenario 6b: purchase order is processed and reconciles with its invoice"
+          po_upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -X POST \
+            -F 'File=@/tmp/purchase-order.pdf;type=application/pdf' \
+            http://127.0.0.1:5080/api/documents)
+
+          po_document_id=$(printf '%s' "$po_upload_json" | jq -r '.id')
+          po_status=$(wait_for_terminal_status "$po_document_id")
+          test "$po_status" = "Processed"
+
+          po_result_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            "http://127.0.0.1:5080/api/documents/$po_document_id/extraction-result")
+
+          printf '%s' "$po_result_json" | jq -e '
+            .validationStatus == "Valid"
+            and .structuredData.document_type == "purchase_order"
+            and .structuredData.data.purchase_order_number == "PO-78421"
+            and .structuredData.data.currency == "EUR"
+            and .structuredData.data.total == "1457.00"
+            and (.structuredData.data.items | length) == 5
+          ' >/dev/null
+
+          reconciliation_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "{\"invoiceDocumentId\":\"$invoice_document_id\",\"purchaseOrderDocumentId\":\"$po_document_id\"}" \
+            http://127.0.0.1:5080/api/reconciliation/invoice-po)
+
+          printf '%s' "$reconciliation_json" | jq -e '
+            .status == "Match"
+            and .needsReviewChecks == 0
+            and .skippedChecks == 0
+            and (.documentChecks | length) == 2
+            and all(.documentChecks[]; .status == "Passed")
+            and (.invoiceItems | length) == 5
+            and all(.invoiceItems[]; .status == "Passed" and .matchMethod == "sku_reference")
+          ' >/dev/null
+
+          echo "Scenario 6c: valid but differently priced PO produces auditable NeedsReview"
+          mismatch_po_upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -X POST \
+            -F 'File=@/tmp/purchase-order-mismatch.pdf;type=application/pdf' \
+            http://127.0.0.1:5080/api/documents)
+
+          mismatch_po_document_id=$(printf '%s' "$mismatch_po_upload_json" | jq -r '.id')
+          mismatch_po_status=$(wait_for_terminal_status "$mismatch_po_document_id")
+          test "$mismatch_po_status" = "Processed"
+
+          mismatch_reconciliation_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "{\"invoiceDocumentId\":\"$invoice_document_id\",\"purchaseOrderDocumentId\":\"$mismatch_po_document_id\"}" \
+            http://127.0.0.1:5080/api/reconciliation/invoice-po)
+
+          printf '%s' "$mismatch_reconciliation_json" | jq -e '
+            .status == "NeedsReview"
+            and .needsReviewChecks >= 2
+            and .invoiceItems[0].status == "NeedsReview"
+            and any(.invoiceItems[0].checks[]; .field == "unit_price" and .status == "NeedsReview" and .invoiceValue == "12.5" and .purchaseOrderValue == "13.5")
+            and any(.invoiceItems[0].checks[]; .field == "line_total" and .status == "NeedsReview" and .invoiceValue == "250" and .purchaseOrderValue == "270")
+            and all(.invoiceItems[1:][]; .status == "Passed")
           ' >/dev/null
 
           echo "Scenario 7: persisted extraction result exports to CSV and XLSX"
