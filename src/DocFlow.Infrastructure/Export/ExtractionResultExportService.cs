@@ -45,6 +45,28 @@ public sealed class ExtractionResultExportService : IExtractionResultExportServi
             source.Review);
         var safeBaseName = BuildSafeBaseName(source.OriginalFileName, documentId);
 
+        if (format is ExtractionResultExportFormat.PurchaseOrderCsv
+            or ExtractionResultExportFormat.PurchaseOrderXlsx)
+        {
+            var purchaseOrder = PurchaseOrderBusinessExporter.Parse(
+                effectiveStructuredDataJson,
+                source.ValidationStatus.ToString(),
+                source.Review is not null);
+
+            return format switch
+            {
+                ExtractionResultExportFormat.PurchaseOrderCsv => new ExtractionResultExportFile(
+                    PurchaseOrderBusinessExporter.ToCsv(purchaseOrder),
+                    "text/csv; charset=utf-8",
+                    $"{safeBaseName}-purchase-order.csv"),
+                ExtractionResultExportFormat.PurchaseOrderXlsx => new ExtractionResultExportFile(
+                    PurchaseOrderBusinessExporter.ToXlsx(purchaseOrder),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    $"{safeBaseName}-purchase-order.xlsx"),
+                _ => throw new UnreachableException()
+            };
+        }
+
         if (format is ExtractionResultExportFormat.InvoiceCsv
             or ExtractionResultExportFormat.InvoiceXlsx)
         {
