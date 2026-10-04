@@ -3,6 +3,7 @@ name: Commercial Invoice Holdout Validation
 on:
   push:
     branches:
+      - 'DocFlow/v_1.1.1.30_MarketAlignment'
       - 'DocFlow/blind-commercial-validation'
     paths:
       - '.github/scripts/build_commercial_holdout_invoice_corpus.py'
