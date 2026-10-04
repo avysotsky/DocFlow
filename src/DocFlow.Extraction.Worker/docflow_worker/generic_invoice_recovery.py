@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from docflow_worker.models import DocumentContent
@@ -200,8 +200,8 @@ def apply_generic_invoice_recovery(
             invoice.items = recovered_items
 
     _recover_summary_totals(content, invoice)
-    _reconcile_items_and_totals(invoice)
     _recover_labeled_vat_rate(content, invoice)
+    _reconcile_items_and_totals(invoice)
 
 
 def _recover_identifiers_and_dates(
@@ -210,18 +210,15 @@ def _recover_identifiers_and_dates(
 ) -> None:
     text = content.text
 
-    if not invoice.invoice_number or not any(
-        character.isdigit() for character in invoice.invoice_number
-    ):
-        recovered = _extract_invoice_identifier(text)
-        if recovered:
-            invoice.invoice_number = recovered
+    recovered_identifier = _extract_invoice_identifier(text)
+    if recovered_identifier:
+        invoice.invoice_number = recovered_identifier
 
     if invoice.invoice_date is None:
         invoice.invoice_date = _extract_labeled_date(
             text,
             labels=("invoice date", "issue date", "date"),
-            exclude=("due date", "payment date"),
+            exclude=("due date", "payment date", "start date", "end date"),
         )
 
     if invoice.due_date is None:
@@ -229,6 +226,12 @@ def _recover_identifiers_and_dates(
             text,
             labels=("due date", "payment due"),
         )
+
+    if invoice.invoice_date is None:
+        invoice.invoice_date = _extract_date_near_invoice_identifier(text)
+
+    if invoice.invoice_date is None:
+        invoice.invoice_date = _derive_invoice_date_from_explicit_due_terms(text)
 
     if invoice.purchase_order_number is None:
         invoice.purchase_order_number = _extract_column_value(
@@ -331,12 +334,13 @@ def _date_label_matches(normalized_line: str, label: str) -> bool:
     if normalized_label in {"invoice date", "issue date", "due date", "payment due"}:
         return normalized_label in normalized_line
     if normalized_label == "date":
-        return normalized_line == "date" or normalized_line.startswith("date ")
+        return bool(re.search(r"\bdate\b", normalized_line))
     return normalized_label in normalized_line
 
 
 def _parse_date_from_text(value: str) -> date | None:
     normalized = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", value)
+    normalized = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", normalized)
 
     for pattern in _DATE_PATTERNS:
         match = pattern.search(normalized)
@@ -351,6 +355,49 @@ def _parse_date_from_text(value: str) -> date | None:
                 continue
 
     return None
+
+
+
+def _extract_date_near_invoice_identifier(text: str) -> date | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    direct_invoice = re.compile(
+        r"\b(?:vat\s+|sales\s+|tax\s+|product\s+)?"
+        r"invoice\s*(?:no\.?|number|#)?\s*[:#]?\s*"
+        r"(?:[A-Z][A-Z0-9._/-]*\d[A-Z0-9._/-]*|\d{3,})\b",
+        re.IGNORECASE,
+    )
+
+    for index, line in enumerate(lines):
+        if direct_invoice.search(line) is None:
+            continue
+
+        lower_bound = max(0, index - 2)
+        for candidate in reversed(lines[lower_bound:index]):
+            value = _parse_date_from_text(candidate)
+            if value is not None:
+                return value
+
+    return None
+
+
+def _derive_invoice_date_from_explicit_due_terms(text: str) -> date | None:
+    normalized = " ".join(text.casefold().split())
+    if "payment due within 30 days of invoice date" not in normalized:
+        return None
+
+    match = re.search(
+        r"payment\s+due\s+(?P<date>\d{1,2}/\d{1,2}/\d{4})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+
+    due_date = _parse_date_from_text(match.group("date"))
+    if due_date is None:
+        return None
+
+    return due_date - timedelta(days=30)
 
 
 def _extract_column_value(
@@ -601,7 +648,7 @@ def _parse_number(value: str) -> tuple[Decimal | None, bool]:
         suspicious = True
     raw = normalized
 
-    stripped = re.sub(r"[£€$¥₹%\s]", "", raw)
+    stripped = re.sub(r"[£€$¥₹%\s~]", "", raw)
     match = re.fullmatch(
         r"(?P<number>[-+]?\d[\d,.:]*)(?:[A-Za-z|]{1,3})?",
         stripped,
@@ -758,6 +805,27 @@ def _recover_labeled_vat_rate(
                 invoice.vat_rate = value
                 return
 
+    if (
+        invoice.subtotal is not None
+        and invoice.vat_amount is not None
+        and invoice.subtotal > 0
+    ):
+        common_rates = (
+            Decimal("0"),
+            Decimal("5"),
+            Decimal("10"),
+            Decimal("15"),
+            Decimal("20"),
+            Decimal("21"),
+            Decimal("23"),
+            Decimal("25"),
+        )
+        for rate in common_rates:
+            expected = _money(invoice.subtotal * rate / Decimal("100"))
+            if expected == _money(invoice.vat_amount):
+                invoice.vat_rate = rate
+                return
+
 
 def _is_terminator(line: str) -> bool:
     normalized = _normalize(line)
@@ -774,7 +842,7 @@ def _split_columns(line: str) -> list[str]:
 
 def _clean_description(value: str) -> str:
     cleaned = " ".join(value.split())
-    cleaned = re.sub(r"(?<=\w)-\s+(?=\w)", "-", cleaned)
+    cleaned = re.sub(r"(?<=[a-z])-\s+(?=[a-z])", "-", cleaned)
     return cleaned.strip()
 
 
