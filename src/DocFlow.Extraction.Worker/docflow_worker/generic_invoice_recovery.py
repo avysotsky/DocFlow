@@ -49,6 +49,7 @@ _LAYOUT_PROFILES = (
         1,
         2,
         3,
+        "last_before",
     ),
     _LayoutProfile(
         "description_qtyhrs_price_vat_net",
@@ -60,6 +61,13 @@ _LAYOUT_PROFILES = (
     _LayoutProfile(
         "activity_qty_rate_vat_amount",
         ("activity", "qty", "rate", "vat", "amount"),
+        0,
+        1,
+        -1,
+    ),
+    _LayoutProfile(
+        "activity_qty_rate_amount",
+        ("activity", "qty", "rate", "amount"),
         0,
         1,
         -1,
@@ -84,6 +92,28 @@ _LAYOUT_PROFILES = (
         0,
         1,
         2,
+    ),
+    _LayoutProfile(
+        "description_qty_unit_net_amount",
+        ("description", "qty", "unit price", "net amount"),
+        0,
+        1,
+        2,
+    ),
+    _LayoutProfile(
+        "item_description_qty_rate_amount",
+        ("item", "description", "qty", "rate", "amount"),
+        -3,
+        -2,
+        -1,
+    ),
+    _LayoutProfile(
+        "quantity_description_unit_net_vat",
+        ("quantity", "description", "unit", "net", "vat"),
+        0,
+        1,
+        2,
+        "after",
     ),
     _LayoutProfile(
         "qty_item_amount_vat_gross",
@@ -236,7 +266,7 @@ def _recover_identifiers_and_dates(
     if invoice.due_date is None:
         invoice.due_date = _extract_labeled_date(
             text,
-            labels=("due date", "payment due"),
+            labels=("due date", "payment due", "due on"),
         )
 
     if invoice.invoice_date is None:
@@ -258,7 +288,7 @@ def _recover_identifiers_and_dates(
                 "purchase order",
                 "purchase order no",
             ),
-        )
+        ) or _extract_inline_purchase_order(text)
 
 
 def _extract_invoice_identifier(text: str) -> str | None:
@@ -419,6 +449,18 @@ def _derive_invoice_date_from_explicit_due_terms(text: str) -> date | None:
         return None
 
     return due_date - timedelta(days=30)
+
+
+def _extract_inline_purchase_order(text: str) -> str | None:
+    match = re.search(
+        r"\b(?:P\.?\s*O\.?|Purchase\s+Order)(?:\s*(?:No\.?|Number))?\s*#?\s*[:#]?\s*"
+        r"(?P<value>[A-Z0-9._/-]{4,})\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return match.group("value").strip()
 
 
 def _extract_column_value(
@@ -860,6 +902,14 @@ def _recover_vertical_microsoft_items(
         for value in section[:12]
         if (number := _parse_vertical_number(value)) is not None
     ]
+
+    if len(numeric) < 5:
+        for value in section[:6]:
+            row_numbers = [number for _, number, _, _ in _numeric_cells(_split_columns(value))]
+            if len(row_numbers) >= 5:
+                numeric = row_numbers
+                break
+
     if len(numeric) < 5:
         return []
 
@@ -1135,7 +1185,10 @@ def _parse_profile_row(
                 if "%" in cell or normalized in {"vat", "no vat"}:
                     continue
                 parts.append(cell.strip())
-            description = " ".join(parts)
+            if profile.description_side == "last_before":
+                description = parts[-1] if parts else ""
+            else:
+                description = " ".join(parts)
 
     description = _clean_description(description or "")
     if not description:
