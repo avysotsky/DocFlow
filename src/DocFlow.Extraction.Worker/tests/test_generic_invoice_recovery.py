@@ -457,7 +457,10 @@ Total
 """
     )
 
-    _, vat_rate, vat_amount, total = extract_totals_from_text(content)
+    totals = extract_totals_from_text(
+        content,
+        lambda value: Decimal(value.replace(",", "").replace(" ", "")) if value else None,
+    )
 
-    assert vat_amount != Decimal("392232306")
-    assert total == Decimal("11.04")
+    assert totals["vat_amount"] != Decimal("392232306")
+    assert totals["total"] == Decimal("11.04")
