@@ -5,6 +5,7 @@ from docflow_worker.engines.deterministic_supplier_invoice_multipage import (
     DeterministicSupplierInvoiceMultipageEngine,
 )
 from docflow_worker.french_invoice_locale import apply_french_invoice_fallbacks
+from docflow_worker.generic_invoice_recovery import apply_generic_invoice_recovery
 from docflow_worker.invoice_layout_fallbacks import apply_split_item_row_fallback
 from docflow_worker.invoice_tax_fallbacks import apply_explicit_no_vat_fallback
 from docflow_worker.models import DocumentContent, StructuredExtractionResult
@@ -44,6 +45,7 @@ async def extract_structured_document(
         apply_explicit_no_vat_fallback(content.text, invoice)
         apply_degraded_invoice_fallbacks(content, invoice)
         apply_french_invoice_fallbacks(content.text, invoice)
+        apply_generic_invoice_recovery(content, invoice)
         result.data = invoice.model_dump()
         validation = SupplierInvoiceValidator().validate(invoice)
     else:
