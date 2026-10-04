@@ -910,7 +910,7 @@ def _recover_vertical_microsoft_items(
 
     end = (
         start
-        if "tax line indicator" in normalized[start]
+        if "indicator" in normalized[start]
         else next(
             (
                 index
