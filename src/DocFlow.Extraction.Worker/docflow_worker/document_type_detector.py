@@ -13,9 +13,12 @@ def detect_document_type(content: DocumentContent) -> str:
         "order number and date must be quoted on invoices",
         "order date",
         "supplier name and address",
+        "supplier:",
         "delivery address",
+        "part number/description",
         "total price (excl. vat)",
         "order total",
+        "grand total",
     )
     purchase_order_score = sum(marker in text for marker in purchase_order_markers)
     has_purchase_order_title = (
@@ -25,6 +28,18 @@ def detect_document_type(content: DocumentContent) -> str:
         or text.lstrip().startswith("purchase order\n")
     )
     if has_purchase_order_title and purchase_order_score >= 2:
+        return "purchase_order"
+
+    if (
+        has_purchase_order_title
+        and "order date" in text
+        and ("supplier:" in text or "supplier name and address" in text)
+        and (
+            "part number/description" in text
+            or ("description" in text and "quantity" in text)
+            or "grand total" in text
+        )
+    ):
         return "purchase_order"
 
     if "invaice" in text and ("invoice total" in text or "total net amount" in text):
