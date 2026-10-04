@@ -33,6 +33,8 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
         if not po.items:
             po.items = self._extract_text_items(content)
         if not po.items:
+            po.items = self._extract_sparse_net_amount_items(content)
+        if not po.items:
             po.items = self._extract_partial_text_items(content)
 
         self._extract_totals(content.text, po)
@@ -189,6 +191,91 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
 
                 if cls._is_description_line(line):
                     description_buffer.append(line)
+
+        return cls._deduplicate_items(items)
+
+    @classmethod
+    def _extract_sparse_net_amount_items(
+        cls,
+        content: DocumentContent,
+    ) -> list[PurchaseOrderItem]:
+        items: list[PurchaseOrderItem] = []
+
+        for page in content.pages:
+            lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+            header_index = next(
+                (
+                    index
+                    for index, line in enumerate(lines)
+                    if "part number/description" in line.casefold()
+                    and "net amount" in line.casefold()
+                ),
+                None,
+            )
+            if header_index is None:
+                continue
+
+            index = header_index + 1
+            while index < len(lines):
+                line = lines[index]
+                normalized = cls._normalize(line)
+                if cls._is_item_section_terminator(normalized):
+                    break
+
+                cells = [
+                    cell.strip()
+                    for cell in re.split(r"[ \t]{2,}", line)
+                    if cell.strip()
+                ]
+                if not cells or not re.fullmatch(r"\d+", cells[0]):
+                    index += 1
+                    continue
+
+                line_number = cells[0]
+                date_index = next(
+                    (i for i, cell in enumerate(cells) if cls._parse_date(cell) is not None),
+                    None,
+                )
+                total = cls._parse_decimal(cells[-1])
+                if date_index is None or total is None:
+                    index += 1
+                    continue
+
+                unit = next(
+                    (cell for cell in cells[date_index + 1 : -1] if cls._looks_like_unit(cell)),
+                    None,
+                )
+                description_parts = cells[1:date_index]
+
+                cursor = index + 1
+                while cursor < len(lines):
+                    candidate = lines[cursor]
+                    candidate_normalized = cls._normalize(candidate)
+                    if cls._is_item_section_terminator(candidate_normalized):
+                        break
+                    if re.match(r"^\d+\s{2,}", candidate):
+                        break
+                    if cls._parse_date(candidate) is not None:
+                        break
+                    if re.search(r"[A-Za-z]", candidate):
+                        description_parts.append(candidate)
+                        cursor += 1
+                        continue
+                    break
+
+                description = " ".join(description_parts).strip()
+                if description:
+                    items.append(
+                        PurchaseOrderItem(
+                            line_number=line_number,
+                            description=" ".join(description.split()),
+                            quantity=None,
+                            unit=unit,
+                            unit_price=None,
+                            line_total=total,
+                        )
+                    )
+                index = max(cursor, index + 1)
 
         return cls._deduplicate_items(items)
 
@@ -496,6 +583,8 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                 continue
             if not any(character.isdigit() for character in candidate):
                 continue
+            if cls._parse_date(candidate) is not None:
+                continue
             return candidate
         return None
 
@@ -526,33 +615,16 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
     @classmethod
     def _extract_supplier_name(cls, content: DocumentContent) -> str | None:
         lines = [line.rstrip() for line in content.text.splitlines() if line.strip()]
+        header_lines = lines[:100]
 
-        for line in lines:
-            match = re.match(
-                r"^\s*(?:supplier|to)[ \t]*:[ \t]*(?P<value>.+?)\s*$",
-                line,
-                flags=re.IGNORECASE,
-            )
-            if match:
-                value = match.group("value").strip()
-                if value:
-                    return cls._clean_supplier_name(value)
-
-        for index, line in enumerate(lines[:80]):
-            normalized_line = cls._normalize(line)
-            if normalized_line == "to":
-                for candidate_line in lines[index + 1 : index + 4]:
-                    candidate = candidate_line.strip()
-                    if re.search(r"[A-Za-z]", candidate):
-                        return cls._clean_supplier_name(candidate)
-
+        # Prefer explicit multi-column supplier headers near the top of the PO.
+        for index, line in enumerate(header_lines):
             cells = [
                 cell.strip()
                 for cell in re.split(r"[ \t]{2,}", line.strip())
                 if cell.strip()
             ]
             normalized_cells = [cls._normalize(cell) for cell in cells]
-
             supplier_column = next(
                 (
                     column
@@ -565,7 +637,7 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             if supplier_column is None:
                 continue
 
-            for candidate_line in lines[index + 1 : index + 6]:
+            for candidate_line in header_lines[index + 1 : index + 6]:
                 candidate_cells = [
                     cell.strip()
                     for cell in re.split(r"[ \t]{2,}", candidate_line.strip())
@@ -573,7 +645,6 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                 ]
                 if not candidate_cells:
                     continue
-
                 candidate = (
                     candidate_cells[supplier_column]
                     if supplier_column < len(candidate_cells)
@@ -588,10 +659,32 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                     break
                 return cls._clean_supplier_name(candidate)
 
+        # Same-line forms such as Supplier: Help Scout PBC.
+        for line in header_lines:
+            match = re.match(
+                r"^\s*(?:supplier|to)[ \t]*:[ \t]*(?P<value>.+?)\s*$",
+                line,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                value = cls._clean_supplier_name(match.group("value"))
+                if value:
+                    return value
+
+        # Standalone To: label followed by supplier on the next line.
+        for index, line in enumerate(header_lines):
+            if cls._normalize(line) != "to":
+                continue
+            for candidate_line in header_lines[index + 1 : index + 4]:
+                candidate = cls._clean_supplier_name(candidate_line)
+                if re.search(r"[A-Za-z]", candidate):
+                    return candidate
+
         return None
 
     @staticmethod
     def _clean_supplier_name(value: str) -> str:
+        value = re.split(r"[ \t]{2,}", value.strip(), maxsplit=1)[0]
         value = re.sub(r"#.*$", "", value).strip()
         return " ".join(value.split())
 
