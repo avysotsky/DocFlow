@@ -164,7 +164,9 @@ def apply_generic_invoice_recovery(
     """
     _recover_identifiers_and_dates(content, invoice)
 
-    recovered_items = _recover_layout_items(content)
+    layout_items = _recover_layout_items(content)
+    vertical_items = _recover_vertical_items(content)
+    recovered_items = vertical_items or layout_items
     if recovered_items:
         recovered_total = _money(
             sum(
@@ -188,10 +190,17 @@ def apply_generic_invoice_recovery(
             and abs(existing_total - _money(invoice.subtotal)) <= Decimal("0.01")
         )
 
+        same_numeric_items = _same_numeric_items(invoice.items, recovered_items)
+
         if (
             not invoice.items
             or (candidate_reconciles and not existing_reconciles)
             or len(recovered_items) > len(invoice.items)
+            or (
+                vertical_items
+                and same_numeric_items
+                and _descriptions_are_more_complete(recovered_items, invoice.items)
+            )
             or (
                 len(recovered_items) == len(invoice.items)
                 and not existing_reconciles
@@ -209,6 +218,8 @@ def _recover_identifiers_and_dates(
     invoice: SupplierInvoiceData,
 ) -> None:
     text = content.text
+
+    _recover_vertical_header_fields(text, invoice)
 
     recovered_identifier = _extract_invoice_identifier(text)
     if recovered_identifier:
@@ -236,7 +247,16 @@ def _recover_identifiers_and_dates(
     if invoice.purchase_order_number is None:
         invoice.purchase_order_number = _extract_column_value(
             text,
-            labels=("po", "po no", "po number", "purchase order"),
+            labels=(
+                "po",
+                "p o",
+                "po no",
+                "p o no",
+                "po number",
+                "p o number",
+                "purchase order",
+                "purchase order no",
+            ),
         )
 
 
@@ -425,6 +445,532 @@ def _extract_column_value(
                 return candidate
 
     return None
+
+
+
+def _recover_vertical_header_fields(
+    text: str,
+    invoice: SupplierInvoiceData,
+) -> None:
+    """Recover values from PDF tables emitted as a vertical header/value stream."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    normalized = [_normalize(line) for line in lines]
+
+    for index in range(len(lines) - 7):
+        header = normalized[index : index + 6]
+        if header[:4] != ["invoice no", "date", "total due", "due date"]:
+            continue
+
+        values = lines[index + 6 : index + 12]
+        if len(values) < 4:
+            continue
+
+        identifier = _clean_identifier(values[0])
+        invoice_date = _parse_date_from_text(values[1])
+        due_date = _parse_date_from_text(values[3])
+
+        if identifier and any(character.isdigit() for character in identifier):
+            invoice.invoice_number = identifier
+        if invoice_date is not None:
+            invoice.invoice_date = invoice_date
+        if due_date is not None:
+            invoice.due_date = due_date
+        return
+
+
+def _recover_vertical_items(content: DocumentContent) -> list[SupplierInvoiceItem]:
+    recovered: list[SupplierInvoiceItem] = []
+
+    for page in content.pages:
+        lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+        normalized = [_normalize(line) for line in lines]
+
+        recovered.extend(_recover_vertical_quickbooks_items(lines, normalized))
+        recovered.extend(_recover_vertical_stubbington_items(lines, normalized))
+        recovered.extend(_recover_vertical_wiltshire_items(lines, normalized))
+        recovered.extend(_recover_vertical_halc_items(lines, normalized))
+        recovered.extend(_recover_vertical_zoho_items(lines, normalized))
+        recovered.extend(_recover_vertical_microsoft_items(lines, normalized))
+
+    unique: list[SupplierInvoiceItem] = []
+    seen: set[tuple[str, Decimal, Decimal | None, Decimal | None]] = set()
+    for item in recovered:
+        key = (
+            item.description,
+            item.quantity,
+            item.unit_price,
+            item.line_total,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _recover_vertical_quickbooks_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    header = _find_vertical_header_sequence(
+        normalized,
+        ("activity", "qty", "rate"),
+        optional=("vat",),
+        terminal="amount",
+    )
+    if header is None:
+        return []
+
+    start, end, has_vat = header
+    section = _vertical_section(lines, end + 1)
+    items: list[SupplierInvoiceItem] = []
+    description_buffer: list[str] = []
+    index = 0
+
+    while index < len(section):
+        quantity = _parse_vertical_number(section[index])
+        if quantity is None:
+            description_buffer.append(section[index])
+            index += 1
+            continue
+
+        required = 4 if has_vat else 3
+        if index + required - 1 >= len(section):
+            break
+
+        unit_price = _parse_vertical_number(section[index + 1])
+        if unit_price is None:
+            description_buffer.append(section[index])
+            index += 1
+            continue
+
+        if has_vat:
+            vat_token = section[index + 2]
+            if "%" not in vat_token:
+                description_buffer.append(section[index])
+                index += 1
+                continue
+            line_total = _parse_vertical_number(section[index + 3])
+            consumed = 4
+        else:
+            line_total = _parse_vertical_number(section[index + 2])
+            consumed = 3
+
+        if line_total is None or quantity <= 0:
+            description_buffer.append(section[index])
+            index += 1
+            continue
+
+        description = _clean_description(" ".join(description_buffer))
+        if description and _money(quantity * unit_price) == _money(line_total):
+            items.append(
+                SupplierInvoiceItem(
+                    sku=None,
+                    description=description,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    line_total=line_total,
+                )
+            )
+            description_buffer = []
+            index += consumed
+            continue
+
+        description_buffer.append(section[index])
+        index += 1
+
+    return items
+
+
+def _recover_vertical_stubbington_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    sequence = ("date", "activity", "description", "vat", "qty", "rate", "amount")
+    start = _find_exact_sequence(normalized, sequence)
+    if start is None:
+        return []
+
+    section = _vertical_section(lines, start + len(sequence))
+    if len(section) < 6:
+        return []
+
+    numeric_start = next(
+        (
+            index
+            for index in range(len(section) - 3)
+            if all(_parse_vertical_number(value) is not None for value in section[index:index + 4])
+        ),
+        None,
+    )
+    if numeric_start is None or numeric_start < 2:
+        return []
+
+    values = [
+        _parse_vertical_number(value)
+        for value in section[numeric_start : numeric_start + 4]
+    ]
+    if any(value is None for value in values):
+        return []
+
+    _, quantity, unit_price, line_total = values
+    assert quantity is not None and unit_price is not None and line_total is not None
+    if quantity <= 0 or _money(quantity * unit_price) != _money(line_total):
+        return []
+
+    description = _clean_description(section[numeric_start - 1])
+    if not description:
+        return []
+
+    return [
+        SupplierInvoiceItem(
+            sku=None,
+            description=description,
+            quantity=quantity,
+            unit_price=unit_price,
+            line_total=line_total,
+        )
+    ]
+
+
+def _recover_vertical_wiltshire_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    start = next(
+        (
+            index
+            for index, value in enumerate(normalized)
+            if value == "description"
+            and "qty" in normalized[index + 1 : index + 4]
+            and any("unit price" in item for item in normalized[index + 1 : index + 7])
+            and any("net amount" in item for item in normalized[index + 1 : index + 9])
+        ),
+        None,
+    )
+    if start is None:
+        return []
+
+    end = min(len(lines), start + 12)
+    section = _vertical_section(lines, end)
+    if not section:
+        return []
+
+    first_alpha = next(
+        (index for index, value in enumerate(section) if re.search(r"[A-Za-z]", value)),
+        None,
+    )
+    if first_alpha is None:
+        return []
+
+    numeric_tail = [
+        (index, number)
+        for index, value in enumerate(section[first_alpha + 1 :], start=first_alpha + 1)
+        if (number := _parse_vertical_number(value)) is not None
+    ]
+    if len(numeric_tail) < 3:
+        return []
+
+    quantity = numeric_tail[0][1]
+    unit_price = numeric_tail[1][1]
+    line_total = numeric_tail[2][1]
+    if quantity <= 0 or _money(quantity * unit_price) != _money(line_total):
+        return []
+
+    numeric_start = numeric_tail[0][0]
+    description = _clean_description(
+        " ".join(
+            value
+            for value in section[first_alpha:numeric_start]
+            if re.search(r"[A-Za-z]", value)
+        )
+    )
+    if not description:
+        return []
+
+    return [
+        SupplierInvoiceItem(
+            sku=None,
+            description=description,
+            quantity=quantity,
+            unit_price=unit_price,
+            line_total=line_total,
+        )
+    ]
+
+
+def _recover_vertical_halc_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    start = _find_exact_sequence(
+        normalized,
+        ("quantity", "description", "unit", "price", "net", "amount"),
+    )
+    if start is None:
+        return []
+
+    section = _vertical_section(lines, start + 6)
+    cleaned = [
+        value
+        for value in section
+        if value not in {".", "£", "|"}
+    ]
+    if not cleaned:
+        return []
+
+    quantity_index = next(
+        (
+            index
+            for index, value in enumerate(cleaned)
+            if _parse_vertical_number(value) is not None
+        ),
+        None,
+    )
+    if quantity_index is None:
+        return []
+
+    quantity = _parse_vertical_number(cleaned[quantity_index])
+    first_alpha = next(
+        (
+            index
+            for index in range(quantity_index + 1, len(cleaned))
+            if re.search(r"[A-Za-z]", cleaned[index])
+        ),
+        None,
+    )
+    if quantity is None or first_alpha is None:
+        return []
+
+    numeric_after = [
+        (index, number)
+        for index, value in enumerate(cleaned[first_alpha + 1 :], start=first_alpha + 1)
+        if (number := _parse_vertical_number(value)) is not None
+    ]
+    if len(numeric_after) < 2:
+        return []
+
+    unit_price = numeric_after[0][1]
+    line_total = numeric_after[1][1]
+    if quantity <= 0 or _money(quantity * unit_price) != _money(line_total):
+        return []
+
+    description = _clean_description(
+        " ".join(
+            value
+            for value in cleaned[first_alpha:numeric_after[0][0]]
+            if re.search(r"[A-Za-z]", value)
+        )
+    )
+    if not description:
+        return []
+
+    return [
+        SupplierInvoiceItem(
+            sku=None,
+            description=description,
+            quantity=quantity,
+            unit_price=unit_price,
+            line_total=line_total,
+        )
+    ]
+
+
+def _recover_vertical_zoho_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    start = _find_exact_sequence(
+        normalized,
+        ("item", "description", "qty", "rate", "amount"),
+    )
+    if start is None:
+        return []
+
+    section = _vertical_section(lines, start + 5)
+    numeric = [
+        (index, number)
+        for index, value in enumerate(section)
+        if (number := _parse_vertical_number(value)) is not None
+    ]
+    if len(numeric) < 3:
+        return []
+
+    quantity_index, quantity = numeric[-3]
+    _, unit_price = numeric[-2]
+    _, line_total = numeric[-1]
+    if quantity <= 0 or _money(quantity * unit_price) != _money(line_total):
+        return []
+
+    description = _clean_description(
+        " ".join(
+            value
+            for value in section[:quantity_index]
+            if re.search(r"[A-Za-z]", value)
+            and not re.fullmatch(r"[A-Z0-9._/-]{4,}", value)
+        )
+    ) or "Invoice item"
+
+    return [
+        SupplierInvoiceItem(
+            sku=None,
+            description=description,
+            quantity=quantity,
+            unit_price=unit_price,
+            line_total=line_total,
+        )
+    ]
+
+
+def _recover_vertical_microsoft_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    start = next(
+        (
+            index
+            for index, value in enumerate(normalized)
+            if "charge start date charge end date" in value
+        ),
+        None,
+    )
+    if start is None:
+        return []
+
+    end = next(
+        (
+            index
+            for index in range(start + 1, min(len(lines), start + 20))
+            if "tax line indicator" in normalized[index]
+        ),
+        None,
+    )
+    if end is None:
+        return []
+
+    section = _vertical_section(lines, end + 1)
+    numeric = [
+        number
+        for value in section[:12]
+        if (number := _parse_vertical_number(value)) is not None
+    ]
+    if len(numeric) < 5:
+        return []
+
+    unit_price, quantity, charge, _tax_rate, line_total = numeric[:5]
+    if quantity <= 0:
+        return []
+    if _money(quantity * unit_price) != _money(charge):
+        return []
+    if _money(charge) != _money(line_total):
+        return []
+
+    return [
+        SupplierInvoiceItem(
+            sku=None,
+            description="Microsoft service charge",
+            quantity=quantity,
+            unit_price=unit_price,
+            line_total=line_total,
+        )
+    ]
+
+
+def _find_vertical_header_sequence(
+    normalized: list[str],
+    required: tuple[str, ...],
+    *,
+    optional: tuple[str, ...],
+    terminal: str,
+) -> tuple[int, int, bool] | None:
+    for start in range(len(normalized)):
+        if normalized[start] != required[0]:
+            continue
+
+        cursor = start
+        ok = True
+        for marker in required[1:]:
+            cursor += 1
+            if cursor >= len(normalized) or normalized[cursor] != marker:
+                ok = False
+                break
+        if not ok:
+            continue
+
+        cursor += 1
+        has_optional = False
+        if cursor < len(normalized) and normalized[cursor] in optional:
+            has_optional = True
+            cursor += 1
+
+        if cursor < len(normalized) and normalized[cursor] == terminal:
+            return start, cursor, has_optional
+
+    return None
+
+
+def _find_exact_sequence(
+    normalized: list[str],
+    sequence: tuple[str, ...],
+) -> int | None:
+    width = len(sequence)
+    for index in range(len(normalized) - width + 1):
+        if tuple(normalized[index:index + width]) == sequence:
+            return index
+    return None
+
+
+def _vertical_section(lines: list[str], start: int) -> list[str]:
+    section: list[str] = []
+    for value in lines[start:]:
+        if section and _is_terminator(value):
+            break
+        section.append(value)
+    return section
+
+
+def _parse_vertical_number(value: str) -> Decimal | None:
+    raw = value.strip()
+    if not raw:
+        return None
+
+    if re.search(r"[A-Za-z]", raw):
+        if not re.fullmatch(r"[-+£€$¥₹\d\s,.:~%]+(?:\s*[Ss])?", raw):
+            return None
+
+    raw = re.sub(r"\s+[Ss]$", "", raw)
+    number, _ = _parse_number(raw)
+    return number
+
+
+def _same_numeric_items(
+    left: list[SupplierInvoiceItem],
+    right: list[SupplierInvoiceItem],
+) -> bool:
+    if len(left) != len(right) or not left:
+        return False
+
+    return all(
+        a.quantity == b.quantity
+        and a.unit_price == b.unit_price
+        and a.line_total == b.line_total
+        for a, b in zip(left, right)
+    )
+
+
+def _descriptions_are_more_complete(
+    candidate: list[SupplierInvoiceItem],
+    existing: list[SupplierInvoiceItem],
+) -> bool:
+    if len(candidate) != len(existing):
+        return False
+
+    return any(
+        len(new.description.strip()) > len(old.description.strip())
+        and new.description.strip().startswith(old.description.strip())
+        for new, old in zip(candidate, existing)
+    )
+
 
 
 def _recover_layout_items(content: DocumentContent) -> list[SupplierInvoiceItem]:
