@@ -54,3 +54,23 @@ def test_detects_proforma_invoice_as_supplier_invoice(title: str) -> None:
 def test_rejects_unknown_document_type() -> None:
     with pytest.raises(ValueError, match="could not be detected"):
         detect_document_type(_content("Generic supplier document"))
+
+
+def test_detects_purchase_order_without_confusing_invoice_po_reference() -> None:
+    content = _content(
+        "Purchase Order Number\nP5084955\nPurchase Order\n"
+        "Order Number and Date must be quoted on Invoices\n"
+        "Date : 03-NOV-2023\nSupplier Name and Address:\nCSL - KPMG LLP\n"
+        "Description Quantity Unit Price Total Price"
+    )
+
+    assert detect_document_type(content) == "purchase_order"
+
+
+def test_invoice_with_purchase_order_reference_remains_invoice() -> None:
+    content = _content(
+        "INVOICE\nInvoice No. INV-1001\nInvoice Date 2026-10-01\n"
+        "Due Date 2026-10-31\nPurchase Order Number PO-44"
+    )
+
+    assert detect_document_type(content) == "supplier_invoice"
