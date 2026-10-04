@@ -1,0 +1,99 @@
+name: Purchase Order Discovery Corpus
+
+on:
+  push:
+    branches:
+      - 'DocFlow/v_1.1.1.31_PurchaseOrderProcessing'
+    paths:
+      - '.github/scripts/build_purchase_order_discovery_corpus.py'
+      - '.github/workflows/purchase-order-discovery.yml'
+      - '.github/scripts/dump_public_reference_text.py'
+      - '.github/scripts/dump_public_reference_processed_text.py'
+      - 'src/DocFlow.Extraction.Worker/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
+
+      - name: Install Tesseract OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+          tessdata_dir=$(dirname "$(dpkg -L tesseract-ocr-eng | grep '/eng.traineddata$' | head -n 1)")
+          test -n "$tessdata_dir"
+          echo "TESSDATA_PREFIX=$tessdata_dir" >> "$GITHUB_ENV"
+
+      - name: Install Python worker
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run regression tests
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pytest -q
+
+      - name: Build discovery corpus
+        run: |
+          python .github/scripts/build_purchase_order_discovery_corpus.py \
+            --output /tmp/docflow-po-discovery \
+            --min-documents 4
+          cat /tmp/docflow-po-discovery/build-summary.json
+          cat /tmp/docflow-po-discovery/sources-report.json
+
+      - name: Capture native and processed text
+        run: |
+          python .github/scripts/dump_public_reference_text.py \
+            --corpus /tmp/docflow-po-discovery/corpus \
+            --output /tmp/docflow-po-discovery/page-texts.json
+
+          python .github/scripts/dump_public_reference_processed_text.py \
+            --corpus /tmp/docflow-po-discovery/corpus \
+            --output /tmp/docflow-po-discovery/processed-texts.json
+
+      - name: Exercise auto document detection
+        shell: bash
+        run: |
+          mkdir -p /tmp/docflow-po-discovery/structured
+          set +e
+          for file in /tmp/docflow-po-discovery/corpus/*.pdf; do
+            name=$(basename "$file" .pdf)
+            mkdir -p "/tmp/docflow-po-discovery/storage/$name"
+            cp "$file" "/tmp/docflow-po-discovery/storage/$name/source.pdf"
+            (
+              cd src/DocFlow.Extraction.Worker
+              python main.py \
+                --storage-root /tmp/docflow-po-discovery/storage \
+                --storage-key "$name/source.pdf" \
+                --document-type auto \
+                --output-structured-json "/tmp/docflow-po-discovery/structured/$name.json"
+            ) > "/tmp/docflow-po-discovery/structured/$name.stdout.json" 2> "/tmp/docflow-po-discovery/structured/$name.stderr.txt"
+            echo "$?" > "/tmp/docflow-po-discovery/structured/$name.exitcode"
+          done
+          exit 0
+
+      - name: Upload discovery artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purchase-order-discovery
+          if-no-files-found: error
+          path: |
+            /tmp/docflow-po-discovery/build-summary.json
+            /tmp/docflow-po-discovery/sources-report.json
+            /tmp/docflow-po-discovery/page-texts.json
+            /tmp/docflow-po-discovery/processed-texts.json
+            /tmp/docflow-po-discovery/structured/*
