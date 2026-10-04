@@ -149,7 +149,6 @@ SOURCES: list[dict[str, Any]] = [
                 "data.items.0.unit_price": "395.00",
                 "data.items.0.discount_rate": "5.00",
                 "data.items.0.line_total": "375.25",
-                "data.discount_amount": "19.75",
                 "data.subtotal": "375.25",
                 "data.vat_rate": "20",
                 "data.vat_amount": "75.05",
