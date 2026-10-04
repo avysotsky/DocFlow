@@ -228,7 +228,8 @@ def apply_generic_invoice_recovery(
             or (candidate_reconciles and not existing_reconciles)
             or len(recovered_items) > len(invoice.items)
             or (
-                same_numeric_items
+                vertical_items
+                and same_numeric_items
                 and _descriptions_are_more_complete(recovered_items, invoice.items)
             )
             or (
