@@ -41,7 +41,7 @@ _TOTAL_PATTERN = re.compile(
 )
 _AMOUNT_IN_WORDS_PATTERN = re.compile(r"^amount\s+in\s+words\b", re.IGNORECASE)
 _VAT_IDENTIFIER_PATTERN = re.compile(
-    r"^(?:vat|tax)\s+(?:number|no\.?|id|reg(?:istration)?(?:\s+no\.?)?)\b",
+    r"^(?:vat|tax)[\s.:#-]*(?:number|no\.?|id|reg(?:istration)?(?:\s+no\.?)?)\b",
     re.IGNORECASE,
 )
 _INVOICE_IDENTIFIER_PATTERNS = (
