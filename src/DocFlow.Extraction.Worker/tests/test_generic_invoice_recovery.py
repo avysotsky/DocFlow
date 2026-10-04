@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from docflow_worker.deterministic_text_fields import extract_totals_from_text
 from docflow_worker.document_type_detector import detect_document_type
+from docflow_worker.engines.deterministic_supplier_invoice import DeterministicSupplierInvoiceEngine
 from docflow_worker.generic_invoice_recovery import apply_generic_invoice_recovery
 from docflow_worker.models import DocumentContent, PageContent
 from docflow_worker.supplier_invoice_models import SupplierInvoiceData
