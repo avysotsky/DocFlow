@@ -1,0 +1,246 @@
+name: Commercial Invoice Holdout Validation
+
+on:
+  push:
+    branches:
+      - 'DocFlow/blind-commercial-validation'
+    paths:
+      - '.github/scripts/build_commercial_holdout_invoice_corpus.py'
+      - '.github/workflows/commercial-invoice-holdout-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  holdout-validation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
+
+      - name: Install Tesseract OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+          tessdata_dir=$(dirname "$(dpkg -L tesseract-ocr-eng | grep '/eng.traineddata$' | head -n 1)")
+          test -n "$tessdata_dir"
+          echo "TESSDATA_PREFIX=$tessdata_dir" >> "$GITHUB_ENV"
+
+      - name: Install Python worker
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run regression tests
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pytest -q
+
+      - name: Build frozen holdout corpus
+        run: |
+          python .github/scripts/build_commercial_holdout_invoice_corpus.py \
+            --output /tmp/docflow-commercial-holdout \
+            --min-documents 8
+          cat /tmp/docflow-commercial-holdout/build-summary.json
+          cat /tmp/docflow-commercial-holdout/sources-report.json
+
+      - name: Run holdout benchmark
+        id: benchmark
+        working-directory: src/DocFlow.Extraction.Worker
+        shell: bash
+        run: |
+          set +e
+          python real_corpus.py \
+            --corpus /tmp/docflow-commercial-holdout/corpus \
+            --manifest /tmp/docflow-commercial-holdout/manifest.json \
+            --results /tmp/docflow-commercial-holdout/results
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Calculate holdout commercial metrics
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from decimal import Decimal, InvalidOperation
+          from pathlib import Path
+
+          root = Path("/tmp/docflow-commercial-holdout")
+          report_path = root / "results" / "benchmark-report.json"
+          manifest_path = root / "manifest.json"
+          if not report_path.exists():
+              raise SystemExit("benchmark-report.json was not produced")
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          expected_by_id = {
+              doc["id"]: doc.get("expected", {}).get("fields", {})
+              for doc in manifest["documents"]
+          }
+
+          header_paths = {
+              "data.invoice_number",
+              "data.invoice_date",
+              "data.due_date",
+              "data.currency",
+              "data.purchase_order_number",
+              "data.subtotal",
+              "data.vat_rate",
+              "data.vat_amount",
+              "data.total",
+          }
+
+          def numeric_equal(expected, actual):
+              if expected is None or actual is None:
+                  return False
+              try:
+                  return Decimal(str(expected)) == Decimal(str(actual))
+              except (InvalidOperation, ValueError):
+                  return False
+
+          totals = {
+              "all_checked": 0,
+              "all_matched_strict": 0,
+              "all_matched_semantic": 0,
+              "header_checked": 0,
+              "header_matched_strict": 0,
+              "header_matched_semantic": 0,
+              "line_item_checked": 0,
+              "line_item_matched_strict": 0,
+              "line_item_matched_semantic": 0,
+          }
+          per_document = []
+
+          for document in report.get("documents", []):
+              comparisons = {
+                  comparison["path"]: comparison
+                  for comparison in document.get("field_comparisons", [])
+              }
+              expected_fields = expected_by_id.get(document["id"], {})
+              counts = {
+                  "all_checked": 0,
+                  "all_matched_strict": 0,
+                  "all_matched_semantic": 0,
+                  "header_checked": 0,
+                  "header_matched_strict": 0,
+                  "header_matched_semantic": 0,
+                  "line_item_checked": 0,
+                  "line_item_matched_strict": 0,
+                  "line_item_matched_semantic": 0,
+              }
+              mismatches = []
+
+              for path, expected in expected_fields.items():
+                  comparison = comparisons.get(path)
+                  actual = None if comparison is None else comparison.get("actual")
+                  strict = bool(comparison and comparison.get("matched"))
+                  semantic = strict or numeric_equal(expected, actual)
+
+                  counts["all_checked"] += 1
+                  counts["all_matched_strict"] += int(strict)
+                  counts["all_matched_semantic"] += int(semantic)
+
+                  if path.startswith("data.items."):
+                      counts["line_item_checked"] += 1
+                      counts["line_item_matched_strict"] += int(strict)
+                      counts["line_item_matched_semantic"] += int(semantic)
+                  elif path in header_paths:
+                      counts["header_checked"] += 1
+                      counts["header_matched_strict"] += int(strict)
+                      counts["header_matched_semantic"] += int(semantic)
+
+                  if not semantic:
+                      mismatches.append({
+                          "path": path,
+                          "expected": expected,
+                          "actual": actual,
+                      })
+
+              for key in totals:
+                  totals[key] += counts[key]
+
+              per_document.append({
+                  "id": document["id"],
+                  "passed_strict": bool(document.get("passed")),
+                  "processing_error": "processing_error" in document.get("failure_reasons", []),
+                  "actual_document_type": document.get("actual_document_type"),
+                  "actual_validation_status": document.get("actual_validation_status"),
+                  "ocr_applied": document.get("ocr_applied"),
+                  **counts,
+                  "semantic_mismatches": mismatches,
+              })
+
+          def accuracy(matched, checked):
+              return None if checked == 0 else round(matched / checked, 4)
+
+          summary = {
+              "documents_total": len(per_document),
+              "documents_strictly_passed": sum(row["passed_strict"] for row in per_document),
+              "processing_errors": sum(row["processing_error"] for row in per_document),
+              **totals,
+              "overall_accuracy_strict": accuracy(
+                  totals["all_matched_strict"], totals["all_checked"]
+              ),
+              "overall_accuracy_semantic": accuracy(
+                  totals["all_matched_semantic"], totals["all_checked"]
+              ),
+              "header_accuracy_strict": accuracy(
+                  totals["header_matched_strict"], totals["header_checked"]
+              ),
+              "header_accuracy_semantic": accuracy(
+                  totals["header_matched_semantic"], totals["header_checked"]
+              ),
+              "line_item_accuracy_strict": accuracy(
+                  totals["line_item_matched_strict"], totals["line_item_checked"]
+              ),
+              "line_item_accuracy_semantic": accuracy(
+                  totals["line_item_matched_semantic"], totals["line_item_checked"]
+              ),
+              "commercial_gate": {
+                  "header_at_least_90_percent": (
+                      totals["header_checked"] > 0
+                      and totals["header_matched_semantic"] / totals["header_checked"] >= 0.90
+                  ),
+                  "line_items_at_least_90_percent": (
+                      totals["line_item_checked"] > 0
+                      and totals["line_item_matched_semantic"] / totals["line_item_checked"] >= 0.90
+                  ),
+                  "no_processing_errors": all(not row["processing_error"] for row in per_document),
+              },
+              "per_document": per_document,
+          }
+
+          (root / "holdout-summary.json").write_text(
+              json.dumps(summary, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Upload holdout artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: commercial-invoice-holdout-validation
+          if-no-files-found: error
+          path: |
+            /tmp/docflow-commercial-holdout/build-summary.json
+            /tmp/docflow-commercial-holdout/sources-report.json
+            /tmp/docflow-commercial-holdout/manifest.json
+            /tmp/docflow-commercial-holdout/holdout-summary.json
+            /tmp/docflow-commercial-holdout/results/*.json
+
+      - name: Ensure holdout completed
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/docflow-commercial-holdout/results/benchmark-report.json
+          test -f /tmp/docflow-commercial-holdout/holdout-summary.json
