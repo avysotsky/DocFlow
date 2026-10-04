@@ -152,6 +152,7 @@ _DATE_PATTERNS = (
     re.compile(r"\b(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b"),
     re.compile(r"\b(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})\b"),
     re.compile(r"\b(?P<date>\d{1,2}\s+[A-Za-z]{3,9}\s*\d{4})\b"),
+    re.compile(r"\b(?P<date>\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2})\b"),
     re.compile(r"\b(?P<date>[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b"),
     re.compile(r"\b(?P<date>\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]{3,9}\s+'?\d{2,4})\b", re.IGNORECASE),
 )
@@ -244,19 +245,23 @@ def apply_generic_invoice_recovery(
         )
 
         same_numeric_items = _same_numeric_items(invoice.items, recovered_items)
+        description_upgrade = (
+            same_numeric_items
+            and _descriptions_are_more_complete(recovered_items, invoice.items)
+            and (
+                bool(vertical_items)
+                or _has_wrapped_business_item_header(content)
+            )
+        )
 
-        if (
+        if description_upgrade:
+            for existing_item, recovered_item in zip(invoice.items, recovered_items):
+                if len(recovered_item.description.strip()) > len(existing_item.description.strip()):
+                    existing_item.description = recovered_item.description
+        elif (
             not invoice.items
             or (candidate_reconciles and not existing_reconciles)
             or len(recovered_items) > len(invoice.items)
-            or (
-                same_numeric_items
-                and _descriptions_are_more_complete(recovered_items, invoice.items)
-                and (
-                    bool(vertical_items)
-                    or _has_wrapped_business_item_header(content)
-                )
-            )
             or (
                 len(recovered_items) == len(invoice.items)
                 and not existing_reconciles
@@ -599,6 +604,8 @@ def _recover_vertical_items(content: DocumentContent) -> list[SupplierInvoiceIte
         lines = [line.strip() for line in page.text.splitlines() if line.strip()]
         normalized = [_normalize(line) for line in lines]
 
+        recovered.extend(_recover_bilingual_net_price_items(lines, normalized))
+        recovered.extend(_recover_qty_description_rate_total_items(lines, normalized))
         recovered.extend(_recover_vertical_quickbooks_items(lines, normalized))
         recovered.extend(_recover_vertical_stubbington_items(lines, normalized))
         recovered.extend(_recover_vertical_wiltshire_items(lines, normalized))
@@ -620,6 +627,134 @@ def _recover_vertical_items(content: DocumentContent) -> list[SupplierInvoiceIte
         seen.add(key)
         unique.append(item)
     return unique
+
+
+def _recover_bilingual_net_price_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    header_end: int | None = None
+    for index in range(len(lines)):
+        window = " ".join(normalized[index : index + 2])
+        if "description" in window and "vat" in window and "net price" in window:
+            header_end = min(index + 1, len(lines) - 1)
+            break
+    if header_end is None:
+        return []
+
+    description_buffer: list[str] = []
+    for line in lines[header_end + 1 :]:
+        if _is_terminator(line) or "due date" in _normalize(line):
+            break
+
+        cells = _split_columns(line)
+        numeric = _numeric_cells(cells)
+        if len(numeric) >= 4:
+            quantity = numeric[0][1]
+            unit_price = numeric[1][1]
+            line_total = numeric[-1][1]
+            if (
+                description_buffer
+                and quantity > 0
+                and _money(quantity * unit_price) == _money(line_total)
+            ):
+                return [
+                    SupplierInvoiceItem(
+                        sku=None,
+                        description=_clean_description(" ".join(description_buffer)),
+                        quantity=quantity,
+                        unit_price=unit_price,
+                        line_total=line_total,
+                    )
+                ]
+
+        if re.search(r"[A-Za-z]", line) and not numeric:
+            description_buffer.append(line.strip())
+
+    return []
+
+
+def _recover_qty_description_rate_total_items(
+    lines: list[str],
+    normalized: list[str],
+) -> list[SupplierInvoiceItem]:
+    start = next(
+        (
+            index
+            for index, value in enumerate(normalized)
+            if "qty" in value
+            and ("description" in value or "descrip on" in value)
+            and "rate" in value
+            and "total" in value
+        ),
+        None,
+    )
+    if start is None:
+        return []
+
+    items: list[SupplierInvoiceItem] = []
+    row_pattern = re.compile(
+        r"^\s*(?P<qty>\d+(?:[.,]\d+)?)\s+"
+        r"(?P<description>.+?)\s+"
+        r"(?P<rate>\d[\d,.]*)\s+"
+        r"(?P<total>\d[\d,.]*)\s*$"
+    )
+
+    for line in lines[start + 1 :]:
+        if _is_terminator(line) or _normalize(line).startswith("net"):
+            break
+
+        cells = _split_columns(line)
+        numeric = _numeric_cells(cells)
+        description = ""
+        quantity: Decimal | None = None
+        unit_price: Decimal | None = None
+        line_total: Decimal | None = None
+
+        if len(numeric) >= 3:
+            quantity = numeric[0][1]
+            unit_price = numeric[-2][1]
+            line_total = numeric[-1][1]
+            quantity_cell = numeric[0][0]
+            rate_cell = numeric[-2][0]
+            description = _clean_description(
+                " ".join(
+                    cell
+                    for cell in cells[quantity_cell + 1 : rate_cell]
+                    if re.search(r"[A-Za-z]", cell)
+                )
+            )
+        else:
+            match = row_pattern.match(line)
+            if match:
+                quantity, _ = _parse_number(match.group("qty"))
+                unit_price, _ = _parse_number(match.group("rate"))
+                line_total, _ = _parse_number(match.group("total"))
+                description = _clean_description(match.group("description"))
+
+        if (
+            quantity is None
+            or unit_price is None
+            or line_total is None
+            or quantity <= 0
+            or not description
+        ):
+            continue
+
+        if _money(quantity * unit_price) != _money(line_total):
+            continue
+
+        items.append(
+            SupplierInvoiceItem(
+                sku=None,
+                description=description,
+                quantity=quantity,
+                unit_price=unit_price,
+                line_total=line_total,
+            )
+        )
+
+    return items
 
 
 def _recover_vertical_quickbooks_items(
