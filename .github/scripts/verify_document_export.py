@@ -97,6 +97,136 @@ def parse_xlsx(payload: bytes) -> dict[str, str]:
     return rows
 
 
+def parse_business_csv(payload: bytes) -> list[dict[str, str]]:
+    text = payload.decode("utf-8-sig")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    assert rows, "Business CSV export contains no line-item rows"
+    expected_headers = [
+        "Supplier",
+        "InvoiceNumber",
+        "InvoiceDate",
+        "DueDate",
+        "Currency",
+        "CustomerReference",
+        "PurchaseOrderNumber",
+        "SKU",
+        "Description",
+        "Quantity",
+        "Unit",
+        "UnitPrice",
+        "DiscountRate",
+        "LineTotal",
+        "Subtotal",
+        "VATRate",
+        "VATAmount",
+        "Total",
+        "ValidationStatus",
+        "ReviewStatus",
+    ]
+    assert list(rows[0].keys()) == expected_headers, list(rows[0].keys())
+    return rows
+
+
+def _xlsx_rows(archive: zipfile.ZipFile, path: str) -> list[list[str]]:
+    root = ET.fromstring(archive.read(path))
+    namespace = {"s": SPREADSHEET_NS}
+    rows: list[list[str]] = []
+    for row in root.findall(".//s:sheetData/s:row", namespace):
+        values: list[str] = []
+        for cell in row.findall("s:c", namespace):
+            text_node = cell.find("s:is/s:t", namespace)
+            values.append("" if text_node is None or text_node.text is None else text_node.text)
+        rows.append(values)
+    return rows
+
+
+def parse_business_xlsx(payload: bytes) -> tuple[dict[str, str], list[dict[str, str]]]:
+    assert payload.startswith(b"PK"), "Business XLSX is not a ZIP/OOXML package"
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        expected_entries = {
+            "[Content_Types].xml",
+            "_rels/.rels",
+            "xl/workbook.xml",
+            "xl/_rels/workbook.xml.rels",
+            "xl/worksheets/sheet1.xml",
+            "xl/worksheets/sheet2.xml",
+        }
+        assert expected_entries.issubset(set(archive.namelist())), archive.namelist()
+
+        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+        namespace = {"s": SPREADSHEET_NS}
+        sheet_names = [
+            sheet.attrib["name"]
+            for sheet in workbook.findall(".//s:sheets/s:sheet", namespace)
+        ]
+        assert sheet_names == ["Invoice", "Line Items"], sheet_names
+
+        summary_rows = _xlsx_rows(archive, "xl/worksheets/sheet1.xml")
+        item_rows = _xlsx_rows(archive, "xl/worksheets/sheet2.xml")
+
+    assert summary_rows and summary_rows[0] == ["Field", "Value"], summary_rows[:1]
+    summary = {
+        row[0]: row[1]
+        for row in summary_rows[1:]
+        if len(row) >= 2
+    }
+
+    assert item_rows, "Line Items worksheet is empty"
+    headers = item_rows[0]
+    expected_item_headers = [
+        "SKU",
+        "Description",
+        "Quantity",
+        "Unit",
+        "UnitPrice",
+        "DiscountRate",
+        "LineTotal",
+    ]
+    assert headers == expected_item_headers, headers
+    items = [
+        {header: value for header, value in zip(headers, row)}
+        for row in item_rows[1:]
+    ]
+    return summary, items
+
+
+def assert_business_export(
+    rows: list[dict[str, str]],
+    summary: dict[str, str] | None = None,
+) -> None:
+    assert len(rows) == 5, len(rows)
+    first = rows[0]
+    assert first["InvoiceNumber"] == "INV-2026-091", first
+    assert first["InvoiceDate"] == "2026-09-30", first
+    assert first["DueDate"] == "2026-10-30", first
+    assert first["Currency"] == "EUR", first
+    assert first["PurchaseOrderNumber"] == "PO-78421", first
+    assert first["SKU"] == "AX-100", first
+    assert first["Description"] == "Sensor bracket", first
+    assert first["Quantity"] == "20", first
+    assert first["Unit"] == "pcs", first
+    assert first["UnitPrice"] == "12.50", first
+    assert first["LineTotal"] == "250.00", first
+    assert first["Subtotal"] == "1457.00", first
+    assert first["VATRate"] == "20", first
+    assert first["VATAmount"] == "291.40", first
+    assert first["Total"] == "1748.40", first
+    assert first["ValidationStatus"] == "Valid", first
+    assert first["ReviewStatus"] == "NotReviewed", first
+
+    if summary is not None:
+        assert summary["Invoice Number"] == "INV-2026-091", summary
+        assert summary["Invoice Date"] == "2026-09-30", summary
+        assert summary["Due Date"] == "2026-10-30", summary
+        assert summary["Currency"] == "EUR", summary
+        assert summary["Purchase Order Number"] == "PO-78421", summary
+        assert summary["Subtotal"] == "1457.00", summary
+        assert summary["VAT Amount"] == "291.40", summary
+        assert summary["Total"] == "1748.40", summary
+        assert summary["Validation Status"] == "Valid", summary
+        assert summary["Review Status"] == "NotReviewed", summary
+
+
 def assert_expected(rows: dict[str, str]) -> None:
     for path, expected in EXPECTED.items():
         actual = rows.get(path)
@@ -139,6 +269,53 @@ def main() -> None:
 
     assert csv_rows == xlsx_rows, "CSV and XLSX do not expose the same flattened data"
 
+    business_csv_status, business_csv_headers, business_csv_payload = fetch(
+        f"{export_base}?format=invoice-csv", args.api_key
+    )
+    assert business_csv_status == 200, business_csv_status
+    assert_headers(business_csv_headers, "text/csv", "-invoice.csv")
+    business_csv_rows = parse_business_csv(business_csv_payload)
+    assert_business_export(business_csv_rows)
+
+    business_xlsx_status, business_xlsx_headers, business_xlsx_payload = fetch(
+        f"{export_base}?format=invoice-xlsx", args.api_key
+    )
+    assert business_xlsx_status == 200, business_xlsx_status
+    assert_headers(
+        business_xlsx_headers,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "-invoice.xlsx",
+    )
+    business_summary, business_items = parse_business_xlsx(business_xlsx_payload)
+    assert_business_export(
+        [
+            {
+                "InvoiceNumber": business_summary["Invoice Number"],
+                "InvoiceDate": business_summary["Invoice Date"],
+                "DueDate": business_summary["Due Date"],
+                "Currency": business_summary["Currency"],
+                "PurchaseOrderNumber": business_summary["Purchase Order Number"],
+                "SKU": item["SKU"],
+                "Description": item["Description"],
+                "Quantity": item["Quantity"],
+                "Unit": item["Unit"],
+                "UnitPrice": item["UnitPrice"],
+                "DiscountRate": item["DiscountRate"],
+                "LineTotal": item["LineTotal"],
+                "Subtotal": business_summary["Subtotal"],
+                "VATRate": business_summary["VAT Rate"],
+                "VATAmount": business_summary["VAT Amount"],
+                "Total": business_summary["Total"],
+                "ValidationStatus": business_summary["Validation Status"],
+                "ReviewStatus": business_summary["Review Status"],
+                "Supplier": business_summary["Supplier"],
+                "CustomerReference": business_summary["Customer Reference"],
+            }
+            for item in business_items
+        ],
+        business_summary,
+    )
+
     bad_status, _, _ = fetch(f"{export_base}?format=pdf", args.api_key)
     assert bad_status == 400, bad_status
 
@@ -149,8 +326,8 @@ def main() -> None:
     assert missing_status == 404, missing_status
 
     print(
-        "Export E2E passed: CSV/XLSX content, equivalent flattened rows, "
-        "unsupported format and missing-result behavior verified."
+        "Export E2E passed: diagnostic CSV/XLSX plus business invoice CSV/XLSX, "
+        "two-sheet workbook structure, unsupported format and missing-result behavior verified."
     )
 
 
