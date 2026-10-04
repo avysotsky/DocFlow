@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import urllib.request
+import time
 from pathlib import Path
 from typing import Any
 
@@ -175,11 +176,25 @@ def download_pdf(url: str, target: Path) -> None:
             "Accept": "application/pdf,*/*;q=0.8",
         },
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        data = response.read()
-    if not data.startswith(b"%PDF"):
-        raise ValueError(f"Downloaded payload is not a PDF ({len(data)} bytes)")
-    target.write_bytes(data)
+
+    last_error: Exception | None = None
+    for attempt in range(1, 5):
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                data = response.read()
+            if not data.startswith(b"%PDF"):
+                raise ValueError(
+                    f"Downloaded payload is not a PDF ({len(data)} bytes)"
+                )
+            target.write_bytes(data)
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt < 4:
+                time.sleep(2 ** (attempt - 1))
+
+    assert last_error is not None
+    raise last_error
 
 
 def extract_pages(source_pdf: Path, page_indexes: list[int], target_pdf: Path) -> dict[str, Any]:
