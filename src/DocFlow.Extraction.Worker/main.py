@@ -40,10 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--document-type",
-        choices=["auto", "supplier_quotation", "supplier_invoice"],
+        choices=["auto", "supplier_quotation", "supplier_invoice", "purchase_order"],
         help=(
             "Run deterministic semantic extraction for a supported document type, "
-            "or detect quotation vs invoice with 'auto'."
+            "or detect quotation, invoice, or purchase order with 'auto'."
         ),
     )
     parser.add_argument(
