@@ -152,7 +152,6 @@ _DATE_PATTERNS = (
     re.compile(r"\b(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b"),
     re.compile(r"\b(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})\b"),
     re.compile(r"\b(?P<date>\d{1,2}\s+[A-Za-z]{3,9}\s*\d{4})\b"),
-    re.compile(r"\b(?P<date>\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2})\b"),
     re.compile(r"\b(?P<date>[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b"),
     re.compile(r"\b(?P<date>\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]{3,9}\s+'?\d{2,4})\b", re.IGNORECASE),
 )
@@ -430,6 +429,24 @@ def _date_label_matches(normalized_line: str, label: str) -> bool:
 
 
 def _parse_date_from_text(value: str) -> date | None:
+    short_year = re.search(
+        r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?\s+"
+        r"(?P<month>[A-Za-z]{3,9})\s+'(?P<year>\d{2})\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if short_year is not None:
+        candidate = (
+            f"{short_year.group('day')} "
+            f"{short_year.group('month')} "
+            f"{short_year.group('year')}"
+        )
+        for date_format in ("%d %b %y", "%d %B %y"):
+            try:
+                return datetime.strptime(candidate, date_format).date()
+            except ValueError:
+                continue
+
     normalized = re.sub(
         r"\b(\d{1,2})(?:st|nd|rd|th)\b",
         r"\1",
