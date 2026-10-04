@@ -471,6 +471,35 @@ jobs:
             --document-id "$invoice_document_id" \
             --document-without-result-id "$failed_document_id"
 
+          echo "Scenario 7b: duplicate supplier invoice is flagged for human review"
+          duplicate_upload_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -X POST \
+            -F 'File=@/tmp/supplier-invoice.pdf;type=application/pdf' \
+            http://127.0.0.1:5080/api/documents)
+
+          duplicate_document_id=$(printf '%s' "$duplicate_upload_json" | jq -r '.id')
+          duplicate_status=$(wait_for_terminal_status "$duplicate_document_id")
+          test "$duplicate_status" = "NeedsReview"
+
+          duplicate_result_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            "http://127.0.0.1:5080/api/documents/$duplicate_document_id/extraction-result")
+
+          printf '%s' "$duplicate_result_json" | jq -e --arg original "$invoice_document_id" '
+            .validationStatus == "Valid"
+            and .structuredData.validation_status == "valid"
+            and .structuredData.business_checks.duplicate_check.status == "suspected"
+            and .structuredData.business_checks.duplicate_check.basis == "supplier_name+invoice_number"
+            and .structuredData.business_checks.duplicate_check.duplicate_of_document_id == $original
+          ' >/dev/null
+
+          duplicate_business_csv=$(curl -fsS \
+            "${auth_header[@]}" \
+            "http://127.0.0.1:5080/api/documents/$duplicate_document_id/export?format=invoice-csv")
+          printf '%s' "$duplicate_business_csv" | grep -q '"suspected"'
+          printf '%s' "$duplicate_business_csv" | grep -q "\"$invoice_document_id\""
+
           echo "Scenario 8: authenticated document inbox enforces tenant isolation"
           docker run --rm --network host \
             -e PGPASSWORD=postgres \
