@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DocFlow.Application.Abstractions;
 
 public enum InvoicePoReconciliationOutcome
@@ -11,6 +13,7 @@ public enum InvoicePoReconciliationOutcome
     InvalidPurchaseOrderDocumentType
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ReconciliationCheckStatus
 {
     Passed,
