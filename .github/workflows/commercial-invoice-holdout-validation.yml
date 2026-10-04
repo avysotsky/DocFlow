@@ -51,6 +51,14 @@ jobs:
           cat /tmp/docflow-commercial-holdout/build-summary.json
           cat /tmp/docflow-commercial-holdout/sources-report.json
 
+          python .github/scripts/dump_public_reference_text.py \
+            --corpus /tmp/docflow-commercial-holdout/corpus \
+            --output /tmp/docflow-commercial-holdout/page-texts.json
+
+          python .github/scripts/dump_public_reference_processed_text.py \
+            --corpus /tmp/docflow-commercial-holdout/corpus \
+            --output /tmp/docflow-commercial-holdout/processed-texts.json
+
       - name: Run holdout benchmark
         id: benchmark
         working-directory: src/DocFlow.Extraction.Worker
@@ -235,6 +243,8 @@ jobs:
             /tmp/docflow-commercial-holdout/build-summary.json
             /tmp/docflow-commercial-holdout/sources-report.json
             /tmp/docflow-commercial-holdout/manifest.json
+            /tmp/docflow-commercial-holdout/page-texts.json
+            /tmp/docflow-commercial-holdout/processed-texts.json
             /tmp/docflow-commercial-holdout/holdout-summary.json
             /tmp/docflow-commercial-holdout/results/*.json
 
