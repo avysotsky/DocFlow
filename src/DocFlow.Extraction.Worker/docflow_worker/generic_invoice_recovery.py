@@ -190,7 +190,7 @@ def apply_generic_invoice_recovery(
 
         if (
             not invoice.items
-            or candidate_reconciles
+            or (candidate_reconciles and not existing_reconciles)
             or len(recovered_items) > len(invoice.items)
             or (
                 len(recovered_items) == len(invoice.items)
