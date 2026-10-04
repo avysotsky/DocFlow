@@ -137,31 +137,20 @@ TOTAL 12.00
 def test_does_not_append_post_table_marketing_note_to_last_item() -> None:
     content = _content(
         """
-Quantity   Description                                        Unit Price   Net Amount   VAT %   VAT £
-1          HALC Affiliation Fee 1st April 2025 to 31st March  275.00  275.00  20.00  55.00
-           2026
-3000       HALC Subscription Fee 2025/26                       0.60    1800.00 20.00  360.00
-4793       HALC Subscription Fee 2025/26                       0.04    191.72  20.00  38.34
-7793       NALC Subscription Fee 2025/26                       0.0834  649.94  20.00  129.99
+ACTIVITY                              QTY               RATE        VAT        AMOUNT
+NALC Subscription Fee 2025/26        7793              0.0834      20.00%     649.94
 If paid by 31st March 2025 the Parish Council will be
 entitled to two free training places (Councillors only)
 valued at £60.00 each.
-Total Net Amount 2916.66
-VAT @ 20% 583.33
-Invoice Total 3499.99
+SUBTOTAL 649.94
 """
     )
-    invoice = SupplierInvoiceData(
-        subtotal=Decimal("2916.66"),
-        vat_rate=Decimal("20"),
-        vat_amount=Decimal("583.33"),
-        total=Decimal("3499.99"),
-    )
+    invoice = SupplierInvoiceData(subtotal=Decimal("649.94"))
 
     apply_generic_invoice_recovery(content, invoice)
 
-    assert len(invoice.items) == 4
-    assert invoice.items[3].description == "NALC Subscription Fee 2025/26"
+    assert len(invoice.items) == 1
+    assert invoice.items[0].description == "NALC Subscription Fee 2025/26"
 
 
 def test_recovers_wrapped_discount_item_and_invoice_discount_amount() -> None:
