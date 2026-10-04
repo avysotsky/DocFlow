@@ -32,8 +32,8 @@ SOURCES: list[dict[str, str]] = [
         "url": "https://www.find-tender.service.gov.uk/Notice/Attachment/A-4650",
     },
     {
-        "id": "po-holdout-go1-4040031091",
-        "url": "https://www.ukri.org/wp-content/uploads/2023/01/UKRI-090123-ProcurementContractData-2568-December2022.pdf",
+        "id": "po-holdout-edwards-2022",
+        "url": "https://www.contractsfinder.service.gov.uk/Notice/Attachment/8893d31d-2908-42c4-9b0a-658adccf921b",
     },
 ]
 
