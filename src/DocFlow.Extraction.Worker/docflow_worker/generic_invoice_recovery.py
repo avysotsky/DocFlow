@@ -271,7 +271,6 @@ def apply_generic_invoice_recovery(
 
     _recover_summary_totals(content, invoice)
     _recover_labeled_vat_rate(content, invoice)
-    _recover_invoice_discount(content, invoice)
     _reconcile_items_and_totals(invoice)
 
 
@@ -1618,36 +1617,6 @@ def _find_labeled_amount(
             return values[-1][1]
 
     return None
-
-
-def _recover_invoice_discount(
-    content: DocumentContent,
-    invoice: SupplierInvoiceData,
-) -> None:
-    if invoice.discount_amount is not None:
-        return
-
-    patterns = (
-        re.compile(
-            r"subtotal\s*\(\s*includes\s+(?:a\s+)?discount\s+of\s+"
-            r"(?P<amount>\d[\d,.]*)\s*\)",
-            flags=re.IGNORECASE,
-        ),
-        re.compile(
-            r"\bdiscount\s+(?:amount\s*)?[:#]?\s*[£€$¥₹]?\s*"
-            r"(?P<amount>\d[\d,.]*)\b",
-            flags=re.IGNORECASE,
-        ),
-    )
-
-    for pattern in patterns:
-        match = pattern.search(content.text)
-        if match is None:
-            continue
-        amount, _ = _parse_number(match.group("amount"))
-        if amount is not None and amount >= 0:
-            invoice.discount_amount = amount
-            return
 
 
 def _reconcile_items_and_totals(invoice: SupplierInvoiceData) -> None:
