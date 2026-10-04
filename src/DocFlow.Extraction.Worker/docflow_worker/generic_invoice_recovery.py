@@ -269,8 +269,12 @@ def _extract_invoice_identifier(text: str) -> str | None:
                     candidate,
                     flags=re.IGNORECASE,
                 )
-                if prefixed:
-                    return _clean_identifier(prefixed[-1])
+                invoice_prefixed = [
+                    value for value in prefixed
+                    if value.upper().startswith("INV")
+                ]
+                if invoice_prefixed:
+                    return _clean_identifier(invoice_prefixed[-1])
 
                 numeric = re.findall(r"\b\d{5,}\b", candidate)
                 if numeric:
