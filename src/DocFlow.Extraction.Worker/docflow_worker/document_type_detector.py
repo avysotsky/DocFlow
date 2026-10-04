@@ -8,6 +8,9 @@ def detect_document_type(content: DocumentContent) -> str:
     """Detect the supported supplier document type using deterministic text markers."""
     text = content.text.lower()
 
+    if "invaice" in text and ("invoice total" in text or "total net amount" in text):
+        return "supplier_invoice"
+
     if "proforma invoice" in text or "pro-forma invoice" in text:
         return "supplier_invoice"
 
