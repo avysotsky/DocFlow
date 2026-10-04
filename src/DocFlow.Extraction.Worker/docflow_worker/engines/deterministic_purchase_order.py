@@ -532,7 +532,14 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                 if value:
                     return cls._clean_supplier_name(value)
 
-        for index, line in enumerate(lines):
+        for index, line in enumerate(lines[:80]):
+            normalized_line = cls._normalize(line)
+            if normalized_line == "to":
+                for candidate_line in lines[index + 1 : index + 4]:
+                    candidate = candidate_line.strip()
+                    if re.search(r"[A-Za-z]", candidate):
+                        return cls._clean_supplier_name(candidate)
+
             cells = [
                 cell.strip()
                 for cell in re.split(r"[ \t]{2,}", line.strip())
