@@ -157,7 +157,7 @@ echo "Retention check: primary tenant inherits enabled state and overrides perio
 retention_upload_json=$(curl -fsS \
   -H "X-DocFlow-Api-Key: $api_key" \
   -X POST \
-  -F 'File=@/tmp/supplier-invoice.pdf;type=application/pdf' \
+  -F 'File=@/tmp/retention-primary-invoice.pdf;type=application/pdf' \
   "$base_url/api/documents")
 retention_upload_id=$(printf '%s' "$retention_upload_json" | jq -r '.id')
 retention_delete_at=$(printf '%s' "$retention_upload_json" | jq -r '.deleteAt')
@@ -176,7 +176,7 @@ echo "Retention check: second tenant explicitly disables automatic retention"
 other_retention_upload_json=$(curl -fsS \
   -H "X-DocFlow-Api-Key: $other_api_key" \
   -X POST \
-  -F 'File=@/tmp/supplier-invoice.pdf;type=application/pdf' \
+  -F 'File=@/tmp/retention-other-invoice.pdf;type=application/pdf' \
   "$base_url/api/documents")
 other_retention_upload_id=$(printf '%s' "$other_retention_upload_json" | jq -r '.id')
 other_retention_delete_at=$(printf '%s' "$other_retention_upload_json" | jq -r '.deleteAt')
@@ -187,8 +187,8 @@ wait_for_status "$other_retention_upload_id" 'Processed' "$other_api_key"
 
 stop_api
 
-cp /tmp/supplier-invoice.pdf "$storage_root/recovery/uploaded.pdf"
-cp /tmp/supplier-invoice.pdf "$storage_root/recovery/processing.pdf"
+cp /tmp/restart-uploaded-invoice.pdf "$storage_root/recovery/uploaded.pdf"
+cp /tmp/restart-processing-invoice.pdf "$storage_root/recovery/processing.pdf"
 
 psql_cmd -c \
   "DELETE FROM \"Documents\" WHERE \"Id\" IN ('$uploaded_document_id', '$processing_document_id');"
@@ -249,7 +249,7 @@ curl -fsS \
   -H "X-DocFlow-Api-Key: $api_key" \
   "$base_url/api/documents/$uploaded_document_id/file"
 
-cmp /tmp/supplier-invoice.pdf /tmp/docflow-source-file.pdf
+cmp /tmp/restart-uploaded-invoice.pdf /tmp/docflow-source-file.pdf
 grep -Eiq '^content-type: application/pdf' /tmp/docflow-source-file.headers
 grep -Eiq '^content-disposition: attachment;.*filename="?restart-uploaded\.pdf"?' /tmp/docflow-source-file.headers
 
