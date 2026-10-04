@@ -96,9 +96,9 @@ _LAYOUT_PROFILES = (
     _LayoutProfile(
         "description_qty_unit_net_amount",
         ("description", "qty", "unit price", "net amount"),
-        0,
         1,
         2,
+        3,
     ),
     _LayoutProfile(
         "item_description_qty_rate_amount",
@@ -228,8 +228,7 @@ def apply_generic_invoice_recovery(
             or (candidate_reconciles and not existing_reconciles)
             or len(recovered_items) > len(invoice.items)
             or (
-                vertical_items
-                and same_numeric_items
+                same_numeric_items
                 and _descriptions_are_more_complete(recovered_items, invoice.items)
             )
             or (
@@ -495,9 +494,37 @@ def _recover_vertical_header_fields(
     text: str,
     invoice: SupplierInvoiceData,
 ) -> None:
-    """Recover values from PDF tables emitted as a vertical header/value stream."""
+    """Recover values from PDF tables emitted as vertical or aligned header/value streams."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     normalized = [_normalize(line) for line in lines]
+
+    rows = [_split_columns(line) for line in lines]
+    for index, row in enumerate(rows[:-1]):
+        header = [_normalize(cell) for cell in row]
+        if not {"invoice no", "date", "due date"}.issubset(set(header)):
+            continue
+
+        values = rows[index + 1]
+        try:
+            invoice_index = header.index("invoice no")
+            date_index = header.index("date")
+            due_index = header.index("due date")
+        except ValueError:
+            continue
+
+        if invoice_index < len(values):
+            identifier = _clean_identifier(values[invoice_index])
+            if identifier and any(character.isdigit() for character in identifier):
+                invoice.invoice_number = identifier
+        if date_index < len(values):
+            recovered_date = _parse_date_from_text(values[date_index])
+            if recovered_date is not None:
+                invoice.invoice_date = recovered_date
+        if due_index < len(values):
+            recovered_due = _parse_date_from_text(values[due_index])
+            if recovered_due is not None:
+                invoice.due_date = recovered_due
+        break
 
     for index in range(len(lines) - 7):
         header = normalized[index : index + 6]
@@ -880,18 +907,22 @@ def _recover_vertical_microsoft_items(
     if start is None:
         return []
 
-    end = next(
-        (
-            index
-            for index in range(start + 1, min(len(lines), start + 20))
-            if "tax line indicator" in normalized[index]
-            or (
-                normalized[index] == "indicator"
-                and index > start
-                and normalized[index - 1] == "tax line"
-            )
-        ),
-        None,
+    end = (
+        start
+        if "tax line indicator" in normalized[start]
+        else next(
+            (
+                index
+                for index in range(start + 1, min(len(lines), start + 20))
+                if "tax line indicator" in normalized[index]
+                or (
+                    normalized[index] == "indicator"
+                    and index > start
+                    and normalized[index - 1] == "tax line"
+                )
+            ),
+            None,
+        )
     )
     if end is None:
         return []
@@ -1095,9 +1126,14 @@ def _recover_layout_items(content: DocumentContent) -> list[SupplierInvoiceItem]
                         pending_description = line
                     elif section and continuation_budget > 0:
                         normalized = _normalize(line)
-                        if not any(
-                            normalized.startswith(prefix)
-                            for prefix in _CONTINUATION_EXCLUSIONS
+                        if (
+                            "subtotal" not in normalized
+                            and "vat total" not in normalized
+                            and "balance due" not in normalized
+                            and not any(
+                                normalized.startswith(prefix)
+                                for prefix in _CONTINUATION_EXCLUSIONS
+                            )
                         ):
                             section[-1].description = _clean_description(
                                 f"{section[-1].description} {line}"
@@ -1392,23 +1428,40 @@ def _recover_labeled_vat_rate(
     content: DocumentContent,
     invoice: SupplierInvoiceData,
 ) -> None:
-    if invoice.vat_rate is not None:
-        return
-
     lines = [line.strip() for line in content.text.splitlines() if line.strip()]
     for index, line in enumerate(lines):
         normalized = _normalize(line)
-        if not normalized.startswith("vat rate"):
+        if "vat" not in normalized or "vat no" in normalized or "vat number" in normalized:
             continue
 
-        for candidate in (line, *lines[index + 1 : index + 3]):
+        candidates = (line, *lines[index + 1 : index + 3])
+        for candidate in candidates:
             match = re.search(r"(?P<rate>\d+(?:[.,]\d+)?)\s*%", candidate)
             if match is None:
                 continue
-            value, _ = _parse_number(match.group("rate"))
-            if value is not None and Decimal("0") <= value <= Decimal("100"):
-                invoice.vat_rate = value
-                return
+
+            rate, _ = _parse_number(match.group("rate"))
+            if (
+                invoice.vat_rate is None
+                and rate is not None
+                and Decimal("0") <= rate <= Decimal("100")
+            ):
+                invoice.vat_rate = rate
+
+            if invoice.vat_amount is None:
+                without_rate = re.sub(
+                    r"\d+(?:[.,]\d+)?\s*%",
+                    "",
+                    candidate,
+                    count=1,
+                )
+                amounts = [
+                    number
+                    for _, number, _, _ in _numeric_cells(_split_columns(without_rate))
+                ]
+                if amounts:
+                    invoice.vat_amount = amounts[-1]
+            return
 
     if (
         invoice.subtotal is not None
