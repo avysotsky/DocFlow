@@ -474,20 +474,22 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             elif normalized.startswith("grand total"):
                 po.total = numbers[-1]
 
-        # Some PDF layouts place the three labels in one text block and values in order.
-        normalized_text = cls._normalize(text)
-        combined = re.search(
-            r"total excluding vat.*?total vat.*?order total\s*(?:gbp|usd|eur)?\s*"
-            r"(?P<subtotal>\d[\d,.]*)\s+"
-            r"(?P<tax>\d[\d,.]*)\s+"
-            r"(?P<total>\d[\d,.]*)",
-            normalized_text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if combined:
-            po.subtotal = cls._parse_decimal(combined.group("subtotal"))
-            po.tax_amount = cls._parse_decimal(combined.group("tax"))
-            po.total = cls._parse_decimal(combined.group("total"))
+        # Some PDF layouts emit the three summary labels in one visual block.
+        # Only use this fallback for values that were not already extracted line-by-line.
+        if po.subtotal is None or po.tax_amount is None or po.total is None:
+            combined = re.search(
+                r"total\s*\(\s*excluding\s+vat\s*\).*?"
+                r"(?P<subtotal>\d[\d,]*(?:\.\d+)?)"
+                r".*?total\s+vat.*?(?P<tax>\d[\d,]*(?:\.\d+)?)"
+                r".*?order\s+total\s*(?:gbp|usd|eur)?\s*"
+                r"(?P<total>\d[\d,]*(?:\.\d+)?)",
+                text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if combined:
+                po.subtotal = po.subtotal or cls._parse_decimal(combined.group("subtotal"))
+                po.tax_amount = po.tax_amount or cls._parse_decimal(combined.group("tax"))
+                po.total = po.total or cls._parse_decimal(combined.group("total"))
 
     @classmethod
     def _reconcile_totals(cls, po: PurchaseOrderData) -> None:
