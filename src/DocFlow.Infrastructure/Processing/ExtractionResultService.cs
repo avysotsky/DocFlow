@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using DocFlow.Application.Abstractions;
 using DocFlow.Application.Observability;
 using DocFlow.Domain.Entities;
@@ -46,6 +48,57 @@ public sealed class ExtractionResultService : IExtractionResultService
                 ExtractionResultSaveOutcome.AlreadyExists);
         }
 
+        Guid? suspectedDuplicateOfDocumentId = null;
+        if (string.Equals(documentType, "supplier_invoice", StringComparison.OrdinalIgnoreCase)
+            && TryGetInvoiceBusinessKey(structuredDataJson, out var currentBusinessKey))
+        {
+            var previousInvoices = await (
+                    from previousResult in _dbContext.ExtractionResults.AsNoTracking()
+                    join previousDocument in _dbContext.Documents.AsNoTracking()
+                        on previousResult.DocumentId equals previousDocument.Id
+                    where previousDocument.CustomerId == document.CustomerId
+                        && previousDocument.Id != documentId
+                        && previousDocument.DocumentType == "supplier_invoice"
+                    orderby previousResult.CreatedAt, previousResult.Id
+                    select new
+                    {
+                        previousResult.DocumentId,
+                        previousResult.StructuredDataJson
+                    })
+                .ToListAsync(cancellationToken);
+
+            foreach (var previous in previousInvoices)
+            {
+                if (!TryGetInvoiceBusinessKey(
+                        previous.StructuredDataJson,
+                        out var previousBusinessKey))
+                {
+                    continue;
+                }
+
+                if (currentBusinessKey == previousBusinessKey)
+                {
+                    suspectedDuplicateOfDocumentId = previous.DocumentId;
+                    break;
+                }
+            }
+
+            structuredDataJson = AddDuplicateCheck(
+                structuredDataJson,
+                suspectedDuplicateOfDocumentId is null ? "clear" : "suspected",
+                suspectedDuplicateOfDocumentId);
+        }
+        else if (string.Equals(
+                     documentType,
+                     "supplier_invoice",
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            structuredDataJson = AddDuplicateCheck(
+                structuredDataJson,
+                "not_checked",
+                duplicateOfDocumentId: null);
+        }
+
         var extractionResult = new ExtractionResult(
             documentId,
             structuredDataJson,
@@ -54,10 +107,15 @@ public sealed class ExtractionResultService : IExtractionResultService
 
         _dbContext.ExtractionResults.Add(extractionResult);
 
-        if (validationStatus == ValidationStatus.Valid)
+        if (validationStatus == ValidationStatus.Valid
+            && suspectedDuplicateOfDocumentId is null)
+        {
             document.MarkProcessed(documentType);
+        }
         else
+        {
             document.MarkNeedsReview(documentType);
+        }
 
         _dbContext.DocumentCompletionEvents.Add(new DocumentCompletionEvent(
             document.Id,
@@ -69,7 +127,7 @@ public sealed class ExtractionResultService : IExtractionResultService
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        if (validationStatus == ValidationStatus.Valid)
+        if (document.Status == DocumentStatus.Processed)
             _metrics.RecordProcessingCompleted();
         else
             _metrics.RecordProcessingNeedsReview();
@@ -87,4 +145,98 @@ public sealed class ExtractionResultService : IExtractionResultService
             ExtractionResultSaveOutcome.Saved,
             savedResult);
     }
+
+
+    private static bool TryGetInvoiceBusinessKey(
+        string structuredDataJson,
+        out InvoiceBusinessKey businessKey)
+    {
+        businessKey = default;
+
+        try
+        {
+            using var json = JsonDocument.Parse(structuredDataJson);
+            var root = json.RootElement;
+
+            if (!root.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var supplier = ReadBusinessKeyValue(data, "supplier_name");
+            var invoiceNumber = ReadBusinessKeyValue(data, "invoice_number");
+            if (string.IsNullOrWhiteSpace(supplier)
+                || string.IsNullOrWhiteSpace(invoiceNumber))
+            {
+                return false;
+            }
+
+            var normalizedSupplier = NormalizeBusinessKeyComponent(supplier);
+            var normalizedInvoiceNumber = NormalizeBusinessKeyComponent(invoiceNumber);
+            if (normalizedSupplier.Length == 0 || normalizedInvoiceNumber.Length == 0)
+                return false;
+
+            businessKey = new InvoiceBusinessKey(
+                normalizedSupplier,
+                normalizedInvoiceNumber);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string AddDuplicateCheck(
+        string structuredDataJson,
+        string status,
+        Guid? duplicateOfDocumentId)
+    {
+        var root = JsonNode.Parse(structuredDataJson) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Structured extraction data must be a JSON object.");
+
+        var businessChecks = root["business_checks"] as JsonObject;
+        if (businessChecks is null)
+        {
+            businessChecks = new JsonObject();
+            root["business_checks"] = businessChecks;
+        }
+
+        businessChecks["duplicate_check"] = new JsonObject
+        {
+            ["status"] = status,
+            ["basis"] = "supplier_name+invoice_number",
+            ["duplicate_of_document_id"] = duplicateOfDocumentId?.ToString()
+        };
+
+        return root.ToJsonString();
+    }
+
+    private static string? ReadBusinessKeyValue(
+        JsonElement data,
+        string propertyName)
+    {
+        if (!data.TryGetProperty(propertyName, out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return value.GetString()?.Trim();
+    }
+
+    private static string NormalizeBusinessKeyComponent(string value)
+    {
+        return new string(
+            value
+                .Where(char.IsLetterOrDigit)
+                .Select(char.ToUpperInvariant)
+                .ToArray());
+    }
+
+    private readonly record struct InvoiceBusinessKey(
+        string Supplier,
+        string InvoiceNumber);
 }
