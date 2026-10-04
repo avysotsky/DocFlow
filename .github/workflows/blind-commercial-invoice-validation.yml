@@ -49,6 +49,14 @@ jobs:
           cat /tmp/docflow-blind-commercial/build-summary.json
           cat /tmp/docflow-blind-commercial/sources-report.json
 
+          python .github/scripts/dump_public_reference_text.py \
+            --corpus /tmp/docflow-blind-commercial/corpus \
+            --output /tmp/docflow-blind-commercial/page-texts.json
+
+          python .github/scripts/dump_public_reference_processed_text.py \
+            --corpus /tmp/docflow-blind-commercial/corpus \
+            --output /tmp/docflow-blind-commercial/processed-texts.json
+
       - name: Run benchmark
         id: benchmark
         working-directory: src/DocFlow.Extraction.Worker
@@ -219,6 +227,8 @@ jobs:
             /tmp/docflow-blind-commercial/build-summary.json
             /tmp/docflow-blind-commercial/sources-report.json
             /tmp/docflow-blind-commercial/manifest.json
+            /tmp/docflow-blind-commercial/page-texts.json
+            /tmp/docflow-blind-commercial/processed-texts.json
             /tmp/docflow-blind-commercial/commercial-summary.json
             /tmp/docflow-blind-commercial/results/*.json
 
