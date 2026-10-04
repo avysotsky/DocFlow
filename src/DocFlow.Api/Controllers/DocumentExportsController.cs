@@ -34,7 +34,7 @@ public sealed class DocumentExportsController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (!TryParseFormat(format, out var exportFormat))
-            return BadRequest("'format' must be 'csv', 'xlsx', 'invoice-csv', or 'invoice-xlsx'.");
+            return BadRequest("'format' must be 'csv', 'xlsx', 'invoice-csv', 'invoice-xlsx', 'po-csv', or 'po-xlsx'.");
 
         var customerId = User.GetRequiredCustomerId();
         var document = await _dbContext.Documents
@@ -47,14 +47,29 @@ public sealed class DocumentExportsController : ControllerBase
             return NotFound();
 
         if (exportFormat is ExtractionResultExportFormat.InvoiceCsv
-            or ExtractionResultExportFormat.InvoiceXlsx
-            && !string.Equals(
-                document.DocumentType,
-                "supplier_invoice",
-                StringComparison.OrdinalIgnoreCase))
+            or ExtractionResultExportFormat.InvoiceXlsx)
         {
-            return BadRequest(
-                "Business invoice export is only available for processed supplier_invoice documents.");
+            if (!string.Equals(
+                    document.DocumentType,
+                    "supplier_invoice",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(
+                    "Business invoice export is only available for processed supplier_invoice documents.");
+            }
+        }
+
+        if (exportFormat is ExtractionResultExportFormat.PurchaseOrderCsv
+            or ExtractionResultExportFormat.PurchaseOrderXlsx)
+        {
+            if (!string.Equals(
+                    document.DocumentType,
+                    "purchase_order",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(
+                    "Business purchase-order export is only available for processed purchase_order documents.");
+            }
         }
 
         var exported = await _exportService.ExportAsync(
@@ -85,6 +100,12 @@ public sealed class DocumentExportsController : ControllerBase
                 return true;
             case "invoice-xlsx":
                 format = ExtractionResultExportFormat.InvoiceXlsx;
+                return true;
+            case "po-csv":
+                format = ExtractionResultExportFormat.PurchaseOrderCsv;
+                return true;
+            case "po-xlsx":
+                format = ExtractionResultExportFormat.PurchaseOrderXlsx;
                 return true;
             default:
                 format = default;
