@@ -34,17 +34,28 @@ public sealed class DocumentExportsController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (!TryParseFormat(format, out var exportFormat))
-            return BadRequest("'format' must be 'csv' or 'xlsx'.");
+            return BadRequest("'format' must be 'csv', 'xlsx', 'invoice-csv', or 'invoice-xlsx'.");
 
         var customerId = User.GetRequiredCustomerId();
-        var isOwned = await _dbContext.Documents
+        var document = await _dbContext.Documents
             .AsNoTracking()
-            .AnyAsync(
-                x => x.Id == documentId && x.CustomerId == customerId,
-                cancellationToken);
+            .Where(x => x.Id == documentId && x.CustomerId == customerId)
+            .Select(x => new { x.DocumentType })
+            .SingleOrDefaultAsync(cancellationToken);
 
-        if (!isOwned)
+        if (document is null)
             return NotFound();
+
+        if (exportFormat is ExtractionResultExportFormat.InvoiceCsv
+            or ExtractionResultExportFormat.InvoiceXlsx
+            && !string.Equals(
+                document.DocumentType,
+                "supplier_invoice",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(
+                "Business invoice export is only available for processed supplier_invoice documents.");
+        }
 
         var exported = await _exportService.ExportAsync(
             documentId,
@@ -68,6 +79,12 @@ public sealed class DocumentExportsController : ControllerBase
                 return true;
             case "xlsx":
                 format = ExtractionResultExportFormat.Xlsx;
+                return true;
+            case "invoice-csv":
+                format = ExtractionResultExportFormat.InvoiceCsv;
+                return true;
+            case "invoice-xlsx":
+                format = ExtractionResultExportFormat.InvoiceXlsx;
                 return true;
             default:
                 format = default;
