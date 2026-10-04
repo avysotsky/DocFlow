@@ -483,6 +483,12 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                 flags=re.IGNORECASE,
             )
             if match is None:
+                match = re.search(
+                    r"(?P<value>[A-Z0-9][A-Z0-9._/-]{2,}\d[A-Z0-9._/-]*)\s*$",
+                    cell,
+                    flags=re.IGNORECASE,
+                )
+            if match is None:
                 continue
             candidate = match.group("value")
             normalized = cls._normalize(candidate)
