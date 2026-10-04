@@ -3,7 +3,7 @@ name: Market Alignment Invoice Validation
 on:
   push:
     branches:
-      - 'DocFlow/blind-commercial-validation'
+      - 'DocFlow/v_1.1.1.30_MarketAlignment'
     paths:
       - '.github/scripts/build_market_alignment_invoice_corpus.py'
       - '.github/workflows/market-alignment-invoice-validation.yml'
