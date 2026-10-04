@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/scripts/build_commercial_holdout_invoice_corpus.py'
       - '.github/workflows/commercial-invoice-holdout-validation.yml'
+      - 'src/DocFlow.Extraction.Worker/**'
   workflow_dispatch:
 
 permissions:
