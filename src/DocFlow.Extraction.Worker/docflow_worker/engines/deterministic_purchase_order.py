@@ -32,6 +32,8 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
         po.items = self._extract_table_items(content)
         if not po.items:
             po.items = self._extract_text_items(content)
+        if not po.items:
+            po.items = self._extract_partial_text_items(content)
 
         self._extract_totals(content.text, po)
         self._reconcile_totals(po)
@@ -327,41 +329,89 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
 
     @classmethod
     def _extract_po_number(cls, text: str) -> str | None:
+        reserved = {"purchase", "order", "number", "date", "page", "supplier"}
+
         direct_patterns = (
             re.compile(
-                r"\bpurchase\s+order\s+(?:number|no\.?|#)\s*[:#]?\s*"
-                r"(?P<value>[A-Z0-9][A-Z0-9._/-]{3,})\b",
+                r"\bpurchase[ \t]+order[ \t]+(?:number|no\.?|#)"
+                r"[ \t]*[:#]?[ \t]*(?P<value>[A-Z0-9][A-Z0-9._/-]{3,})\b",
                 re.IGNORECASE,
             ),
             re.compile(
-                r"\border\s+(?:number|no\.?|#)\s*[:#]?\s*"
-                r"(?P<value>[A-Z0-9][A-Z0-9._/-]{3,})\b",
+                r"\border[ \t]+(?:number|no\.?|#)"
+                r"[ \t]*[:#]?[ \t]*(?P<value>[A-Z0-9][A-Z0-9._/-]{3,})\b",
                 re.IGNORECASE,
             ),
             re.compile(
-                r"\bpurchase\s+order\s+(?P<value>\d{6,})(?:[,/]\d+)?\b",
-                re.IGNORECASE,
+                r"^\s*order[ \t]+(?P<value>\d{6,}(?:[-/][A-Z0-9]+)?)\b",
+                re.IGNORECASE | re.MULTILINE,
             ),
         )
         for pattern in direct_patterns:
             match = pattern.search(text)
             if match:
-                return match.group("value").strip()
-
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        for index, line in enumerate(lines):
-            normalized = cls._normalize(line)
-            if normalized not in {"purchase order number", "order number"}:
-                continue
-
-            for candidate in lines[index + 1 : index + 4]:
-                candidate_normalized = cls._normalize(candidate)
-                if "purchase order" in candidate_normalized or "order date" in candidate_normalized:
-                    continue
-                match = re.fullmatch(r"[A-Z0-9][A-Z0-9._/-]{3,}", candidate, flags=re.IGNORECASE)
-                if match:
+                candidate = match.group("value").strip()
+                if cls._normalize(candidate) not in reserved:
                     return candidate
 
+        lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+        for index, line in enumerate(lines):
+            normalized = cls._normalize(line)
+            cells = [
+                cell.strip()
+                for cell in re.split(r"[ \t]{2,}", line.strip())
+                if cell.strip()
+            ]
+
+            if "purchase order number" in normalized:
+                for cell in reversed(cells):
+                    if "purchase order" in cls._normalize(cell):
+                        continue
+                    candidate = cls._po_number_candidate(cell, reserved)
+                    if candidate:
+                        return candidate
+
+                for candidate_line in lines[index + 1 : index + 5]:
+                    candidate = cls._po_number_candidate(candidate_line.strip(), reserved)
+                    if candidate:
+                        return candidate
+
+            if normalized == "purchase order":
+                for candidate_line in lines[index + 1 : index + 4]:
+                    candidate = cls._po_number_candidate(candidate_line.strip(), reserved)
+                    if candidate:
+                        return candidate
+
+        return None
+
+    @classmethod
+    def _po_number_candidate(
+        cls,
+        value: str,
+        reserved: set[str],
+    ) -> str | None:
+        cells = [
+            cell.strip()
+            for cell in re.split(r"[ \t]{2,}", value)
+            if cell.strip()
+        ]
+        candidates = cells if cells else [value.strip()]
+
+        for cell in reversed(candidates):
+            match = re.fullmatch(
+                r"(?P<value>[A-Z0-9][A-Z0-9._/-]{3,})",
+                cell,
+                flags=re.IGNORECASE,
+            )
+            if match is None:
+                continue
+            candidate = match.group("value")
+            normalized = cls._normalize(candidate)
+            if normalized in reserved:
+                continue
+            if not any(character.isdigit() for character in candidate):
+                continue
+            return candidate
         return None
 
     @classmethod
