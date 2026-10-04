@@ -1,0 +1,91 @@
+name: Purchase Order Independent Holdout Discovery
+
+on:
+  push:
+    branches:
+      - 'DocFlow/v_1.1.1.31_PurchaseOrderProcessing'
+    paths:
+      - '.github/scripts/build_purchase_order_holdout_discovery.py'
+      - '.github/workflows/purchase-order-holdout-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: src/DocFlow.Extraction.Worker/pyproject.toml
+
+      - name: Install Tesseract OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+          tessdata_dir=$(dirname "$(dpkg -L tesseract-ocr-eng | grep '/eng.traineddata$' | head -n 1)")
+          test -n "$tessdata_dir"
+          echo "TESSDATA_PREFIX=$tessdata_dir" >> "$GITHUB_ENV"
+
+      - name: Install Python worker
+        working-directory: src/DocFlow.Extraction.Worker
+        run: python -m pip install -e ".[dev]"
+
+      - name: Build untouched holdout
+        run: |
+          python .github/scripts/build_purchase_order_holdout_discovery.py \
+            --output /tmp/docflow-po-holdout \
+            --min-documents 5
+          cat /tmp/docflow-po-holdout/build-summary.json
+          cat /tmp/docflow-po-holdout/sources-report.json
+
+      - name: Capture source text
+        run: |
+          python .github/scripts/dump_public_reference_text.py \
+            --corpus /tmp/docflow-po-holdout/corpus \
+            --output /tmp/docflow-po-holdout/page-texts.json
+          python .github/scripts/dump_public_reference_processed_text.py \
+            --corpus /tmp/docflow-po-holdout/corpus \
+            --output /tmp/docflow-po-holdout/processed-texts.json
+
+      - name: Run current extractor without tuning
+        shell: bash
+        run: |
+          mkdir -p /tmp/docflow-po-holdout/structured
+          set +e
+          for file in /tmp/docflow-po-holdout/corpus/*.pdf; do
+            name=$(basename "$file" .pdf)
+            mkdir -p "/tmp/docflow-po-holdout/storage/$name"
+            cp "$file" "/tmp/docflow-po-holdout/storage/$name/source.pdf"
+            (
+              cd src/DocFlow.Extraction.Worker
+              python main.py \
+                --storage-root /tmp/docflow-po-holdout/storage \
+                --storage-key "$name/source.pdf" \
+                --document-type auto \
+                --output-structured-json "/tmp/docflow-po-holdout/structured/$name.json"
+            ) > "/tmp/docflow-po-holdout/structured/$name.stdout.json" 2> "/tmp/docflow-po-holdout/structured/$name.stderr.txt"
+            echo "$?" > "/tmp/docflow-po-holdout/structured/$name.exitcode"
+          done
+          exit 0
+
+      - name: Upload untouched holdout
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purchase-order-independent-holdout-discovery
+          if-no-files-found: error
+          path: |
+            /tmp/docflow-po-holdout/build-summary.json
+            /tmp/docflow-po-holdout/sources-report.json
+            /tmp/docflow-po-holdout/page-texts.json
+            /tmp/docflow-po-holdout/processed-texts.json
+            /tmp/docflow-po-holdout/structured/*
