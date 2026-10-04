@@ -148,3 +148,67 @@ def test_purchase_order_validator_detects_price_mismatch() -> None:
 
     assert validation.status == "invalid"
     assert validation.checks["line_totals"].status == "failed"
+
+
+def test_recovers_ukhsa_po_number_supplier_and_partial_item() -> None:
+    content = _content(
+        """
+Purchase Order                             Purchase Order Number
+                          P5084955
+Page Number: 1 of 2
+Date : 03-NOV-23
+
+Supplier Name and Address:            Delivery Address:            All Invoices To Be Sent To:
+CSL - KPMG LLP                        UKHSA SOUTH OFFICE            UKHSA ACCOUNTS
+
+Your Reference  Description  Unit Of Measure  Quantity  Unit Price (excl. VAT)  Total Price (excl. VAT)
+100 x GraphPad Prism licences for PHE staff to be recharged back to relevant cost centres.    Each
+Need by Date 25-Aug-2022
+
+Order Total GBP 12,864.00
+"""
+    )
+
+    result = asyncio.run(DeterministicPurchaseOrderEngine().extract(content))
+    po = PurchaseOrderData.model_validate(result.data)
+
+    assert po.purchase_order_number == "P5084955"
+    assert po.supplier_name == "CSL - KPMG LLP"
+    assert len(po.items) == 1
+    assert po.items[0].description == (
+        "100 x GraphPad Prism licences for PHE staff to be recharged back to relevant cost centres."
+    )
+    assert po.items[0].unit == "Each"
+    assert po.items[0].need_by_date == date(2022, 8, 25)
+    assert po.items[0].quantity is None
+    assert po.items[0].unit_price is None
+
+
+def test_detects_and_extracts_ukri_help_scout_purchase_order() -> None:
+    content = _content(
+        """
+Purchase Order
+4070408506,0
+COPY
+Order                  4070408506
+Order Date              02-MAY-2025
+Revision                0
+Supplier:    Help Scout PBC
+Line     Part Number/Description               Delivery        Quantity  UOM      Unit Price    Tax      Net Amount
+                                                Date                                 (USD)                  (USD)
+1          Supplier Item:                      02-MAY-2025             Each                                 15,955.20
+           Help Scout Renewal for Centre for
+           Environmental Data Analysis
+Grand Total                 15,955.20
+"""
+    )
+
+    result = asyncio.run(extract_structured_document(content, document_type="auto"))
+    po = PurchaseOrderData.model_validate(result.data)
+
+    assert result.document_type == "purchase_order"
+    assert po.purchase_order_number == "4070408506"
+    assert po.order_date == date(2025, 5, 2)
+    assert po.supplier_name == "Help Scout PBC"
+    assert po.currency == "USD"
+    assert po.total == Decimal("15955.20")
