@@ -84,6 +84,10 @@ jobs:
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/invalid-supplier-quotation.pdf 1748.42
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/borderless-supplier-quotation.pdf --borderless
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/supplier-invoice.pdf
+          python .github/scripts/generate_supplier_invoice_pdf.py /tmp/retention-primary-invoice.pdf --invoice-number INV-RETENTION-PRIMARY
+          python .github/scripts/generate_supplier_invoice_pdf.py /tmp/retention-other-invoice.pdf --invoice-number INV-RETENTION-OTHER
+          python .github/scripts/generate_supplier_invoice_pdf.py /tmp/restart-uploaded-invoice.pdf --invoice-number INV-RESTART-UPLOADED
+          python .github/scripts/generate_supplier_invoice_pdf.py /tmp/restart-processing-invoice.pdf --invoice-number INV-RESTART-PROCESSING
 
       - name: Verify automated processing scenarios
         env:
