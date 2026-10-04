@@ -316,6 +316,53 @@ SOURCES: list[dict[str, Any]] = [
                 "data.total": "1430.96"
             }
         }
+    },
+    {
+        "id": "blind-chris-berwick-2543",
+        "url": "https://www.shaftesbury-tc.gov.uk/wp-content/uploads/2023-01-17-Invoices-for-approval.pdf",
+        "pages": [1],
+        "supplier": "Chris Berwick Ltd",
+        "layout_class": "embedded-narrative-vat-invoice",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "2543",
+                "data.invoice_date": "2022-10-01",
+                "data.currency": "GBP",
+                "data.subtotal": "747.60",
+                "data.vat_rate": "20",
+                "data.vat_amount": "149.52",
+                "data.total": "897.12"
+            }
+        }
+    },
+    {
+        "id": "blind-cumbria-clock-16624",
+        "url": "https://www.shaftesbury-tc.gov.uk/wp-content/uploads/2023-01-17-Invoices-for-approval.pdf",
+        "pages": [5],
+        "supplier": "The Cumbria Clock Company Ltd",
+        "layout_class": "embedded-two-line-service-invoice",
+        "expected": {
+            "document_type": "supplier_invoice",
+            "fields": {
+                "data.invoice_number": "16624",
+                "data.invoice_date": "2022-12-30",
+                "data.due_date": "2023-01-18",
+                "data.currency": "GBP",
+                "data.items.0.description": "Re:- Shaftesbury Town Hall Clock",
+                "data.items.0.quantity": "1.00",
+                "data.items.0.unit_price": "0.00",
+                "data.items.0.line_total": "0.00",
+                "data.items.1.description": "To servicing the above clock on 19th December 2022",
+                "data.items.1.quantity": "1.00",
+                "data.items.1.unit_price": "150.00",
+                "data.items.1.line_total": "150.00",
+                "data.subtotal": "150.00",
+                "data.vat_rate": "20.00",
+                "data.vat_amount": "30.00",
+                "data.total": "180.00"
+            }
+        }
     }
 ]
 
