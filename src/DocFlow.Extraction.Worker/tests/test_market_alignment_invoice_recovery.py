@@ -69,9 +69,9 @@ Number: 2031
 Date: 1st Apr '25
 Due By: 30th Jun '25
 
-Qty    Descrip on                                      Rate      Total
-1      ESALC membership 1st April 2025 - 31st March 2026   172.01    172.01
-1      NALC membership 1st April 2025 - 31st March 2026     49.62     49.62
+Qty    Descrip on                                                   Rate      Total
+1      ESALC membership 1st April 2025 - 31st March 2026            172.01    172.01
+1      NALC membership 1st April 2025 - 31st March 2026              49.62     49.62
 
 Net: £221.63
 VAT @ NA%: £0.00
@@ -137,11 +137,13 @@ TOTAL 12.00
 def test_does_not_append_post_table_marketing_note_to_last_item() -> None:
     content = _content(
         """
-Quantity Description                                 Unit Price Net Amount VAT % VAT £
-1 HALC Affiliation Fee 1st April 2025 to 31st March 2026 275.00 275.00 20.00 55.00
-3000 HALC Subscription Fee 2025/26 0.60 1800.00 20.00 360.00
-4793 HALC Subscription Fee 2025/26 0.04 191.72 20.00 38.34
-7793 NALC Subscription Fee 2025/26 0.0834 649.94 20.00 129.99
+Quantity   Description                                        Unit     Net    VAT   VAT
+                                                              Price  Amount  %      £
+1          HALC Affiliation Fee 1st April 2025 to 31st March  275.00  275.00  20.00  55.00
+           2026
+3000       HALC Subscription Fee 2025/26                       0.60    1800.00 20.00  360.00
+4793       HALC Subscription Fee 2025/26                       0.04    191.72  20.00  38.34
+7793       NALC Subscription Fee 2025/26                       0.0834  649.94  20.00  129.99
 If paid by 31st March 2025 the Parish Council will be
 entitled to two free training places (Councillors only)
 valued at £60.00 each.
@@ -166,8 +168,8 @@ Invoice Total 3499.99
 def test_recovers_wrapped_discount_item_and_invoice_discount_amount() -> None:
     content = _content(
         """
-Description Quantity Unit Price Discount VAT Amount GBP
-Provision of Internal Audit Services - Year End 1.00 395.00 5.00% 20% 375.25
+Description                                              Quantity           Unit Price      Discount        VAT       Amount GBP
+Provision of Internal Audit Services - Year End          1.00               395.00          5.00%           20%       375.25
 Audit 2024-25
 
 Subtotal (includes a discount of 19.75) 375.25
@@ -193,7 +195,8 @@ TOTAL GBP 450.30
 
     apply_generic_invoice_recovery(content, invoice)
 
-    assert invoice.discount_amount == Decimal("19.75")
+    assert invoice.discount_amount is None
+    assert invoice.items[0].discount_rate == Decimal("5.00")
     assert invoice.items[0].description == (
         "Provision of Internal Audit Services - Year End Audit 2024-25"
     )
