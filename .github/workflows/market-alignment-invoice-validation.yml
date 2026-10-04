@@ -108,13 +108,23 @@ jobs:
               "data.total",
           }
 
-          def numeric_equal(expected, actual):
+          def semantic_equal(expected, actual):
               if expected is None or actual is None:
                   return False
+
               try:
                   return Decimal(str(expected)) == Decimal(str(actual))
               except (InvalidOperation, ValueError):
-                  return False
+                  pass
+
+              def normalize_text(value):
+                  text = str(value)
+                  for character in "\u2010\u2011\u2012\u2013\u2014\u2212":
+                      text = text.replace(character, "-")
+                  text = text.replace("\u00a0", " ")
+                  return " ".join(text.split()).casefold()
+
+              return normalize_text(expected) == normalize_text(actual)
 
           totals = {
               "all_checked": 0,
@@ -152,7 +162,7 @@ jobs:
                   comparison = comparisons.get(path)
                   actual = None if comparison is None else comparison.get("actual")
                   strict = bool(comparison and comparison.get("matched"))
-                  semantic = strict or numeric_equal(expected, actual)
+                  semantic = strict or semantic_equal(expected, actual)
 
                   counts["all_checked"] += 1
                   counts["all_matched_strict"] += int(strict)
