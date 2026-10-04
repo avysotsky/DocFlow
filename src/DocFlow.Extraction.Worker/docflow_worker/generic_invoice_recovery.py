@@ -1,0 +1,784 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+from docflow_worker.models import DocumentContent
+from docflow_worker.supplier_invoice_models import SupplierInvoiceData, SupplierInvoiceItem
+
+
+@dataclass(frozen=True)
+class _LayoutProfile:
+    name: str
+    markers: tuple[str, ...]
+    quantity_position: int
+    unit_price_position: int | None
+    line_total_position: int
+    description_side: str = "before"
+
+
+_LAYOUT_PROFILES = (
+    _LayoutProfile(
+        "meter_copy",
+        ("prev meter", "curr meter", "used", "charge"),
+        2,
+        3,
+        4,
+    ),
+    _LayoutProfile(
+        "ocr_unit_net",
+        ("unit price", "netamt", "vatquantity", "description"),
+        0,
+        1,
+        2,
+        "after",
+    ),
+    _LayoutProfile(
+        "quantity_description_each_net",
+        ("quantity description", "each", "net amount"),
+        0,
+        1,
+        2,
+        "after",
+    ),
+    _LayoutProfile(
+        "date_description_vat_qty_rate_amount",
+        ("date", "description", "vat", "qty", "rate", "amount"),
+        1,
+        2,
+        3,
+    ),
+    _LayoutProfile(
+        "description_qtyhrs_price_vat_net",
+        ("description", "qty hrs", "price rate", "net"),
+        0,
+        1,
+        -1,
+    ),
+    _LayoutProfile(
+        "activity_qty_rate_vat_amount",
+        ("activity", "qty", "rate", "vat", "amount"),
+        0,
+        1,
+        -1,
+    ),
+    _LayoutProfile(
+        "item_description_qty_unit_total",
+        ("item description", "qty", "unit price", "total price"),
+        0,
+        1,
+        2,
+    ),
+    _LayoutProfile(
+        "description_quantity_unit_vat",
+        ("description", "quantity", "unit price", "vat"),
+        0,
+        1,
+        -1,
+    ),
+    _LayoutProfile(
+        "description_quantity_rate_amount",
+        ("description", "quantity", "rate", "amount"),
+        0,
+        1,
+        2,
+    ),
+    _LayoutProfile(
+        "qty_item_amount_vat_gross",
+        ("qty", "item", "amount", "vat amt", "vat rate", "gross amt"),
+        0,
+        None,
+        1,
+        "after",
+    ),
+    _LayoutProfile(
+        "description_quantity_unit_amount",
+        ("description", "quantity", "unit price", "amount"),
+        0,
+        1,
+        2,
+    ),
+)
+
+_DATE_PATTERNS = (
+    re.compile(r"\b(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b"),
+    re.compile(r"\b(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})\b"),
+    re.compile(r"\b(?P<date>\d{1,2}\s+[A-Za-z]{3,9}\s*\d{4})\b"),
+    re.compile(r"\b(?P<date>[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b"),
+)
+_DATE_FORMATS = (
+    "%d/%m/%Y",
+    "%d/%m/%y",
+    "%d-%m-%Y",
+    "%d-%m-%y",
+    "%d-%b-%Y",
+    "%d-%b-%y",
+    "%d %b %Y",
+    "%d %B %Y",
+    "%b %d, %Y",
+    "%B %d, %Y",
+)
+
+_TERMINATOR_PREFIXES = (
+    "subtotal",
+    "total",
+    "vat total",
+    "vat rate",
+    "amount due",
+    "balance due",
+    "payment due",
+    "payment should",
+    "please deduct",
+    "vat summary",
+    "notes",
+    "terms",
+    "bank details",
+    "please use invoice",
+    "alternatively payment",
+    "monies to be drawn",
+    "delivery to",
+)
+
+_CONTINUATION_EXCLUSIONS = (
+    "please",
+    "account",
+    "sort code",
+    "registered",
+    "toner excess",
+    "if you",
+    "payment",
+)
+
+
+def apply_generic_invoice_recovery(
+    content: DocumentContent,
+    invoice: SupplierInvoiceData,
+) -> None:
+    """Recover common real-world invoice layouts missed by the primary parser.
+
+    The recovery remains deterministic. It recognizes layout families by column
+    semantics rather than supplier identity and prefers arithmetic reconciliation
+    over accepting free-form OCR guesses.
+    """
+    _recover_identifiers_and_dates(content, invoice)
+
+    recovered_items = _recover_layout_items(content)
+    if recovered_items:
+        recovered_total = _money(
+            sum(
+                (item.line_total for item in recovered_items if item.line_total is not None),
+                Decimal("0"),
+            )
+        )
+        existing_total = _money(
+            sum(
+                (item.line_total for item in invoice.items if item.line_total is not None),
+                Decimal("0"),
+            )
+        )
+
+        candidate_reconciles = (
+            invoice.subtotal is not None
+            and abs(recovered_total - _money(invoice.subtotal)) <= Decimal("0.01")
+        )
+        existing_reconciles = (
+            invoice.subtotal is not None
+            and abs(existing_total - _money(invoice.subtotal)) <= Decimal("0.01")
+        )
+
+        if (
+            not invoice.items
+            or candidate_reconciles
+            or len(recovered_items) > len(invoice.items)
+            or (
+                len(recovered_items) == len(invoice.items)
+                and not existing_reconciles
+            )
+        ):
+            invoice.items = recovered_items
+
+    _recover_summary_totals(content, invoice)
+    _reconcile_items_and_totals(invoice)
+    _recover_labeled_vat_rate(content, invoice)
+
+
+def _recover_identifiers_and_dates(
+    content: DocumentContent,
+    invoice: SupplierInvoiceData,
+) -> None:
+    text = content.text
+
+    if not invoice.invoice_number or not any(
+        character.isdigit() for character in invoice.invoice_number
+    ):
+        recovered = _extract_invoice_identifier(text)
+        if recovered:
+            invoice.invoice_number = recovered
+
+    if invoice.invoice_date is None:
+        invoice.invoice_date = _extract_labeled_date(
+            text,
+            labels=("invoice date", "issue date", "date"),
+            exclude=("due date", "payment date"),
+        )
+
+    if invoice.due_date is None:
+        invoice.due_date = _extract_labeled_date(
+            text,
+            labels=("due date", "payment due"),
+        )
+
+    if invoice.purchase_order_number is None:
+        invoice.purchase_order_number = _extract_column_value(
+            text,
+            labels=("po", "po no", "po number", "purchase order"),
+        )
+
+
+def _extract_invoice_identifier(text: str) -> str | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    direct_patterns = (
+        re.compile(
+            r"\b(?:vat\s+|sales\s+|tax\s+|product\s+)?"
+            r"invoice\s*(?:no\.?|number|#)?\s*[:#]?\s*"
+            r"(?P<value>[A-Z][A-Z0-9._/-]*\d[A-Z0-9._/-]*|\d{3,})\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:f?invaice)\s*no\.?\s*[:#]?\s*(?P<value>\d{3,})\b",
+            re.IGNORECASE,
+        ),
+    )
+
+    for line in lines:
+        for pattern in direct_patterns:
+            match = pattern.search(line)
+            if match:
+                return _clean_identifier(match.group("value"))
+
+    for index, line in enumerate(lines):
+        normalized = _normalize(line)
+
+        if "date" in normalized and "invoice" in normalized:
+            for candidate in lines[index + 1 : index + 3]:
+                prefixed = re.findall(
+                    r"\b[A-Z]{2,}[A-Z0-9._/-]*\d[A-Z0-9._/-]*\b",
+                    candidate,
+                    flags=re.IGNORECASE,
+                )
+                if prefixed:
+                    return _clean_identifier(prefixed[-1])
+
+                numeric = re.findall(r"\b\d{5,}\b", candidate)
+                if numeric:
+                    return numeric[-1]
+
+        if normalized == "product invoice":
+            for candidate in lines[index + 1 : index + 4]:
+                if re.fullmatch(r"\d{3,}", candidate.strip()):
+                    return candidate.strip()
+
+    return None
+
+
+def _clean_identifier(value: str) -> str:
+    value = value.strip()
+    upper = value.upper().replace(" ", "")
+    for suffix in ("PAYMENTADVICE", "PAYMENT"):
+        position = upper.find(suffix)
+        if position > 0:
+            return value[:position].rstrip("._/- ")
+    return value
+
+
+def _extract_labeled_date(
+    text: str,
+    *,
+    labels: tuple[str, ...],
+    exclude: tuple[str, ...] = (),
+) -> date | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    for index, line in enumerate(lines):
+        normalized = _normalize(line)
+        if any(label in normalized for label in exclude):
+            continue
+
+        if not any(_date_label_matches(normalized, label) for label in labels):
+            continue
+
+        value = _parse_date_from_text(line)
+        if value is not None:
+            return value
+
+        for candidate in lines[index + 1 : index + 3]:
+            value = _parse_date_from_text(candidate)
+            if value is not None:
+                return value
+
+    return None
+
+
+def _date_label_matches(normalized_line: str, label: str) -> bool:
+    normalized_label = _normalize(label)
+    if normalized_label in {"invoice date", "issue date", "due date", "payment due"}:
+        return normalized_label in normalized_line
+    if normalized_label == "date":
+        return normalized_line == "date" or normalized_line.startswith("date ")
+    return normalized_label in normalized_line
+
+
+def _parse_date_from_text(value: str) -> date | None:
+    normalized = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", value)
+
+    for pattern in _DATE_PATTERNS:
+        match = pattern.search(normalized)
+        if match is None:
+            continue
+
+        candidate = " ".join(match.group("date").split())
+        for date_format in _DATE_FORMATS:
+            try:
+                return datetime.strptime(candidate, date_format).date()
+            except ValueError:
+                continue
+
+    return None
+
+
+def _extract_column_value(
+    text: str,
+    *,
+    labels: tuple[str, ...],
+) -> str | None:
+    rows = [_split_columns(line) for line in text.splitlines() if line.strip()]
+
+    for index, row in enumerate(rows[:-1]):
+        normalized = [_normalize(cell) for cell in row]
+        for label in labels:
+            normalized_label = _normalize(label)
+            try:
+                column = normalized.index(normalized_label)
+            except ValueError:
+                continue
+
+            next_row = rows[index + 1]
+            if column >= len(next_row):
+                continue
+
+            candidate = next_row[column].strip()
+            if re.fullmatch(r"[A-Z0-9._/-]{3,}", candidate, flags=re.IGNORECASE):
+                return candidate
+
+    return None
+
+
+def _recover_layout_items(content: DocumentContent) -> list[SupplierInvoiceItem]:
+    recovered: list[SupplierInvoiceItem] = []
+
+    for page in content.pages:
+        lines = [line.rstrip() for line in page.text.splitlines()]
+        index = 0
+
+        while index < len(lines):
+            profile = _find_profile(lines[index])
+            if profile is None:
+                index += 1
+                continue
+
+            section: list[SupplierInvoiceItem] = []
+            pending_description: str | None = None
+            continuation_budget = 0
+            cursor = index + 1
+
+            while cursor < len(lines):
+                if _find_profile(lines[cursor]) is not None:
+                    break
+                if _is_terminator(lines[cursor]):
+                    break
+
+                raw_line = lines[cursor]
+                line = raw_line.strip()
+                if not line:
+                    cursor += 1
+                    continue
+
+                parsed = _parse_profile_row(
+                    raw_line,
+                    profile,
+                    pending_description=pending_description,
+                )
+                if parsed is not None:
+                    section.append(parsed)
+                    pending_description = None
+                    continuation_budget = 3
+                    cursor += 1
+                    continue
+
+                cells = _split_columns(raw_line)
+                numbers = _numeric_cells(cells)
+                has_alpha = bool(re.search(r"[A-Za-z]", line))
+
+                if has_alpha and not numbers:
+                    next_index = cursor + 1
+                    while next_index < len(lines) and not lines[next_index].strip():
+                        next_index += 1
+
+                    next_line = lines[next_index] if next_index < len(lines) else ""
+                    next_has_alpha = bool(re.search(r"[A-Za-z]", next_line))
+                    if (
+                        next_line
+                        and not next_has_alpha
+                        and _parse_profile_row(
+                            next_line,
+                            profile,
+                            pending_description=line,
+                        )
+                        is not None
+                    ):
+                        pending_description = line
+                    elif section and continuation_budget > 0:
+                        normalized = _normalize(line)
+                        if not any(
+                            normalized.startswith(prefix)
+                            for prefix in _CONTINUATION_EXCLUSIONS
+                        ):
+                            section[-1].description = _clean_description(
+                                f"{section[-1].description} {line}"
+                            )
+                elif (
+                    section
+                    and continuation_budget > 0
+                    and re.fullmatch(r"\d{4}", line)
+                ):
+                    section[-1].description = _clean_description(
+                        f"{section[-1].description} {line}"
+                    )
+
+                continuation_budget = max(0, continuation_budget - 1)
+                cursor += 1
+
+            recovered.extend(section)
+            index = max(cursor, index + 1)
+
+    return recovered
+
+
+def _find_profile(line: str) -> _LayoutProfile | None:
+    normalized = _normalize(line)
+    for profile in _LAYOUT_PROFILES:
+        if all(marker in normalized for marker in profile.markers):
+            return profile
+    return None
+
+
+def _parse_profile_row(
+    line: str,
+    profile: _LayoutProfile,
+    *,
+    pending_description: str | None = None,
+) -> SupplierInvoiceItem | None:
+    cells = _split_columns(line)
+    numbers = _numeric_cells(cells)
+
+    quantity_token = _number_at(numbers, profile.quantity_position)
+    line_total_token = _number_at(numbers, profile.line_total_position)
+    if quantity_token is None or line_total_token is None:
+        return None
+
+    quantity_index, quantity, _, _ = quantity_token
+    _, line_total, line_total_suspicious, _ = line_total_token
+    if quantity <= 0:
+        return None
+
+    unit_price: Decimal | None = None
+    unit_price_suspicious = False
+    if profile.unit_price_position is not None:
+        unit_token = _number_at(numbers, profile.unit_price_position)
+        if unit_token is not None:
+            _, unit_price, unit_price_suspicious, _ = unit_token
+
+    if (
+        profile.line_total_position == -1
+        and line_total_token[0] < len(cells) - 1
+        and all(
+            re.fullmatch(r"[A-Za-z|]{1,3}", cell.strip())
+            for cell in cells[line_total_token[0] + 1 :]
+        )
+    ):
+        line_total_suspicious = True
+
+    description = pending_description
+    if not description:
+        if profile.description_side == "after":
+            description = next(
+                (
+                    cell.strip()
+                    for cell in cells[quantity_index + 1 :]
+                    if re.search(r"[A-Za-z]", cell)
+                    and _parse_date_from_text(cell) is None
+                ),
+                "",
+            )
+        else:
+            parts = []
+            for cell in cells[:quantity_index]:
+                normalized = _normalize(cell)
+                if not re.search(r"[A-Za-z]", cell):
+                    continue
+                if "%" in cell or normalized in {"vat", "no vat"}:
+                    continue
+                parts.append(cell.strip())
+            description = " ".join(parts)
+
+    description = _clean_description(description or "")
+    if not description:
+        return None
+
+    if unit_price is not None:
+        calculated = _money(quantity * unit_price)
+        printed_total = _money(line_total)
+
+        if abs(calculated - printed_total) > Decimal("0.01"):
+            if unit_price_suspicious and not line_total_suspicious:
+                unit_price = printed_total / quantity
+            elif line_total_suspicious and not unit_price_suspicious:
+                line_total = calculated
+
+    return SupplierInvoiceItem(
+        sku=None,
+        description=description,
+        quantity=quantity,
+        unit_price=unit_price,
+        line_total=line_total,
+    )
+
+
+def _number_at(
+    values: list[tuple[int, Decimal, bool, str]],
+    position: int,
+) -> tuple[int, Decimal, bool, str] | None:
+    if not values:
+        return None
+    try:
+        return values[position]
+    except IndexError:
+        return None
+
+
+def _numeric_cells(
+    cells: list[str],
+) -> list[tuple[int, Decimal, bool, str]]:
+    values: list[tuple[int, Decimal, bool, str]] = []
+    for index, cell in enumerate(cells):
+        value, suspicious = _parse_number(cell)
+        if value is not None:
+            values.append((index, value, suspicious, cell))
+    return values
+
+
+def _parse_number(value: str) -> tuple[Decimal | None, bool]:
+    raw = value.strip()
+    if not raw:
+        return None, False
+
+    suspicious = False
+
+    normalized = re.sub(r"(?<=\d):(?=\d)", ".", raw)
+    if normalized != raw:
+        suspicious = True
+    raw = normalized
+
+    normalized = re.sub(r"(?<=\d)[OoC](?=\d)", "0", raw, flags=re.IGNORECASE)
+    if normalized != raw:
+        suspicious = True
+    raw = normalized
+
+    stripped = re.sub(r"[£€$¥₹%\s]", "", raw)
+    match = re.fullmatch(
+        r"(?P<number>[-+]?\d[\d,.:]*)(?:[A-Za-z|]{1,3})?",
+        stripped,
+    )
+    if match is None:
+        return None, suspicious
+
+    compact = match.group("number").replace(":", "")
+    if compact != stripped:
+        suspicious = True
+
+    if "," in compact and "." in compact:
+        if compact.rfind(",") > compact.rfind("."):
+            compact = compact.replace(".", "").replace(",", ".")
+        else:
+            compact = compact.replace(",", "")
+    elif "," in compact:
+        tail = compact.rsplit(",", 1)[1]
+        compact = (
+            compact.replace(",", ".")
+            if len(tail) == 2
+            else compact.replace(",", "")
+        )
+
+    try:
+        return Decimal(compact), suspicious
+    except InvalidOperation:
+        return None, suspicious
+
+
+def _recover_summary_totals(
+    content: DocumentContent,
+    invoice: SupplierInvoiceData,
+) -> None:
+    text = content.text
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    # Copier/service layouts often place labels on one row and the three values on
+    # the following row.
+    for index, line in enumerate(lines[:-1]):
+        normalized = _normalize(line)
+        if (
+            "inv goods" in normalized
+            and "invoice vat" in normalized
+            and "inv total" in normalized
+        ):
+            for candidate in lines[index + 1 : index + 4]:
+                numbers = [
+                    value
+                    for _, value, _, _ in _numeric_cells(_split_columns(candidate))
+                ]
+                if len(numbers) >= 3:
+                    subtotal, vat_amount, total = numbers[-3:]
+                    if _money(subtotal + vat_amount) == _money(total):
+                        invoice.subtotal = subtotal
+                        invoice.vat_amount = vat_amount
+                        invoice.total = total
+                        break
+
+    net = _find_labeled_amount(
+        lines,
+        labels=("total net amount", "nett", "net"),
+    )
+    vat = _find_labeled_amount(
+        lines,
+        labels=("total tax", "total vat", "vat"),
+    )
+    gross = _find_labeled_amount(
+        lines,
+        labels=("invoice total", "gross", "total due"),
+    )
+
+    if net is not None and vat is not None and gross is not None:
+        if _money(net + vat) == _money(gross):
+            if invoice.subtotal is None or _money(invoice.subtotal) != _money(net):
+                invoice.subtotal = net
+            if invoice.vat_amount is None or _money(invoice.vat_amount) != _money(vat):
+                invoice.vat_amount = vat
+            if invoice.total is None or _money(invoice.total) != _money(gross):
+                invoice.total = gross
+
+
+def _find_labeled_amount(
+    lines: list[str],
+    *,
+    labels: tuple[str, ...],
+) -> Decimal | None:
+    for line in lines:
+        normalized = _normalize(line)
+        if not any(
+            normalized.startswith(_normalize(label))
+            or f" {_normalize(label)} " in f" {normalized} "
+            for label in labels
+        ):
+            continue
+
+        values = _numeric_cells(_split_columns(line))
+        if values:
+            return values[-1][1]
+
+    return None
+
+
+def _reconcile_items_and_totals(invoice: SupplierInvoiceData) -> None:
+    if not invoice.items or any(item.line_total is None for item in invoice.items):
+        return
+
+    item_total = _money(
+        sum(
+            (item.line_total for item in invoice.items if item.line_total is not None),
+            Decimal("0"),
+        )
+    )
+
+    if (
+        invoice.total is not None
+        and invoice.vat_rate is not None
+        and invoice.discount_amount is None
+    ):
+        expected_vat = _money(item_total * invoice.vat_rate / Decimal("100"))
+        expected_total = _money(item_total + expected_vat)
+        if expected_total == _money(invoice.total):
+            invoice.subtotal = item_total
+            invoice.vat_amount = expected_vat
+            return
+
+    if (
+        invoice.total is not None
+        and invoice.vat_amount is not None
+        and _money(item_total + invoice.vat_amount) == _money(invoice.total)
+    ):
+        invoice.subtotal = item_total
+
+
+def _recover_labeled_vat_rate(
+    content: DocumentContent,
+    invoice: SupplierInvoiceData,
+) -> None:
+    if invoice.vat_rate is not None:
+        return
+
+    lines = [line.strip() for line in content.text.splitlines() if line.strip()]
+    for index, line in enumerate(lines):
+        normalized = _normalize(line)
+        if not normalized.startswith("vat rate"):
+            continue
+
+        for candidate in (line, *lines[index + 1 : index + 3]):
+            match = re.search(r"(?P<rate>\d+(?:[.,]\d+)?)\s*%", candidate)
+            if match is None:
+                continue
+            value, _ = _parse_number(match.group("rate"))
+            if value is not None and Decimal("0") <= value <= Decimal("100"):
+                invoice.vat_rate = value
+                return
+
+
+def _is_terminator(line: str) -> bool:
+    normalized = _normalize(line)
+    return any(normalized.startswith(prefix) for prefix in _TERMINATOR_PREFIXES)
+
+
+def _split_columns(line: str) -> list[str]:
+    return [
+        cell.strip()
+        for cell in re.split(r"[ \t]{2,}", line.strip())
+        if cell.strip()
+    ]
+
+
+def _clean_description(value: str) -> str:
+    cleaned = " ".join(value.split())
+    cleaned = re.sub(r"(?<=\w)-\s+(?=\w)", "-", cleaned)
+    return cleaned.strip()
+
+
+def _normalize(value: str) -> str:
+    return " ".join(
+        re.sub(r"[^a-z0-9]+", " ", value.casefold()).split()
+    )
+
+
+def _money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
