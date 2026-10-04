@@ -3,7 +3,9 @@ namespace DocFlow.Application.Abstractions;
 public enum ExtractionResultExportFormat
 {
     Csv,
-    Xlsx
+    Xlsx,
+    InvoiceCsv,
+    InvoiceXlsx
 }
 
 public sealed record ExtractionResultExportFile(
