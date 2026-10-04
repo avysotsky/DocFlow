@@ -233,6 +233,104 @@ def assert_business_export(
         assert summary["Review Status"] == "NotReviewed", summary
 
 
+def parse_po_business_csv(payload: bytes) -> list[dict[str, str]]:
+    text = payload.decode("utf-8-sig")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    assert rows, "Purchase-order business CSV contains no rows"
+    expected_headers = [
+        "Supplier",
+        "PurchaseOrderNumber",
+        "OrderDate",
+        "Currency",
+        "LineNumber",
+        "SupplierReference",
+        "Description",
+        "NeedByDate",
+        "Quantity",
+        "Unit",
+        "UnitPrice",
+        "LineTotal",
+        "Subtotal",
+        "TaxAmount",
+        "Total",
+        "ValidationStatus",
+        "ReviewStatus",
+    ]
+    assert list(rows[0].keys()) == expected_headers, list(rows[0].keys())
+    return rows
+
+
+def parse_po_business_xlsx(payload: bytes) -> tuple[dict[str, str], list[dict[str, str]]]:
+    assert payload.startswith(b"PK"), "Purchase-order XLSX is not a ZIP/OOXML package"
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+        namespace = {"s": SPREADSHEET_NS}
+        sheet_names = [
+            sheet.attrib["name"]
+            for sheet in workbook.findall(".//s:sheets/s:sheet", namespace)
+        ]
+        assert sheet_names == ["Purchase Order", "Line Items"], sheet_names
+
+        summary_rows = _xlsx_rows(archive, "xl/worksheets/sheet1.xml")
+        item_rows = _xlsx_rows(archive, "xl/worksheets/sheet2.xml")
+
+    assert summary_rows and summary_rows[0] == ["Field", "Value"], summary_rows[:1]
+    summary = {
+        row[0]: row[1]
+        for row in summary_rows[1:]
+        if len(row) >= 2
+    }
+
+    expected_item_headers = [
+        "LineNumber",
+        "SupplierReference",
+        "Description",
+        "NeedByDate",
+        "Quantity",
+        "Unit",
+        "UnitPrice",
+        "LineTotal",
+    ]
+    assert item_rows and item_rows[0] == expected_item_headers, item_rows[:1]
+    items = [
+        {header: value for header, value in zip(expected_item_headers, row)}
+        for row in item_rows[1:]
+    ]
+    return summary, items
+
+
+def assert_po_business_export(
+    rows: list[dict[str, str]],
+    summary: dict[str, str] | None = None,
+) -> None:
+    assert len(rows) == 5, len(rows)
+    first = rows[0]
+    assert first["Supplier"] == "ACME Components Ltd.", first
+    assert first["PurchaseOrderNumber"] == "PO-78421", first
+    assert first["OrderDate"] == "2026-09-15", first
+    assert first["Currency"] == "EUR", first
+    assert first["SupplierReference"] == "AX-100", first
+    assert first["Description"] == "Sensor bracket", first
+    assert first["Quantity"] == "20", first
+    assert first["Unit"] == "pcs", first
+    assert first["UnitPrice"] == "12.50", first
+    assert first["LineTotal"] == "250.00", first
+    assert first["Subtotal"] == "1457.00", first
+    assert first["Total"] == "1457.00", first
+    assert first["ValidationStatus"] == "Valid", first
+    assert first["ReviewStatus"] == "NotReviewed", first
+
+    if summary is not None:
+        assert summary["Supplier"] == "ACME Components Ltd.", summary
+        assert summary["Purchase Order Number"] == "PO-78421", summary
+        assert summary["Order Date"] == "2026-09-15", summary
+        assert summary["Currency"] == "EUR", summary
+        assert summary["Subtotal"] == "1457.00", summary
+        assert summary["Total"] == "1457.00", summary
+        assert summary["Validation Status"] == "Valid", summary
+        assert summary["Review Status"] == "NotReviewed", summary
+
+
 def assert_expected(rows: dict[str, str]) -> None:
     for path, expected in EXPECTED.items():
         actual = rows.get(path)
@@ -248,6 +346,7 @@ def main() -> None:
     parser.add_argument("--api-key", required=True)
     parser.add_argument("--document-id", required=True)
     parser.add_argument("--document-without-result-id", required=True)
+    parser.add_argument("--purchase-order-document-id")
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
@@ -324,6 +423,55 @@ def main() -> None:
         business_summary,
     )
 
+    if args.purchase_order_document_id:
+        po_export_base = (
+            f"{base_url}/api/documents/{args.purchase_order_document_id}/export"
+        )
+
+        po_csv_status, po_csv_headers, po_csv_payload = fetch(
+            f"{po_export_base}?format=po-csv", args.api_key
+        )
+        assert po_csv_status == 200, po_csv_status
+        assert_headers(po_csv_headers, "text/csv", "-purchase-order.csv")
+        po_csv_rows = parse_po_business_csv(po_csv_payload)
+        assert_po_business_export(po_csv_rows)
+
+        po_xlsx_status, po_xlsx_headers, po_xlsx_payload = fetch(
+            f"{po_export_base}?format=po-xlsx", args.api_key
+        )
+        assert po_xlsx_status == 200, po_xlsx_status
+        assert_headers(
+            po_xlsx_headers,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "-purchase-order.xlsx",
+        )
+        po_summary, po_items = parse_po_business_xlsx(po_xlsx_payload)
+        assert_po_business_export(
+            [
+                {
+                    "Supplier": po_summary["Supplier"],
+                    "PurchaseOrderNumber": po_summary["Purchase Order Number"],
+                    "OrderDate": po_summary["Order Date"],
+                    "Currency": po_summary["Currency"],
+                    "LineNumber": item["LineNumber"],
+                    "SupplierReference": item["SupplierReference"],
+                    "Description": item["Description"],
+                    "NeedByDate": item["NeedByDate"],
+                    "Quantity": item["Quantity"],
+                    "Unit": item["Unit"],
+                    "UnitPrice": item["UnitPrice"],
+                    "LineTotal": item["LineTotal"],
+                    "Subtotal": po_summary["Subtotal"],
+                    "TaxAmount": po_summary["Tax Amount"],
+                    "Total": po_summary["Total"],
+                    "ValidationStatus": po_summary["Validation Status"],
+                    "ReviewStatus": po_summary["Review Status"],
+                }
+                for item in po_items
+            ],
+            po_summary,
+        )
+
     bad_status, _, _ = fetch(f"{export_base}?format=pdf", args.api_key)
     assert bad_status == 400, bad_status
 
@@ -334,8 +482,9 @@ def main() -> None:
     assert missing_status == 404, missing_status
 
     print(
-        "Export E2E passed: diagnostic CSV/XLSX plus business invoice CSV/XLSX, "
-        "two-sheet workbook structure, unsupported format and missing-result behavior verified."
+        "Export E2E passed: diagnostic CSV/XLSX, business invoice CSV/XLSX, "
+        "business purchase-order CSV/XLSX, workbook structure, unsupported format "
+        "and missing-result behavior verified."
     )
 
 
