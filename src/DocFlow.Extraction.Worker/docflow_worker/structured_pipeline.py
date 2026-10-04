@@ -1,6 +1,6 @@
 from docflow_worker.degraded_invoice_fallbacks import apply_degraded_invoice_fallbacks
 from docflow_worker.document_type_detector import detect_document_type
-from docflow_worker.engines import DeterministicSupplierQuotationEngine
+from docflow_worker.engines import DeterministicPurchaseOrderEngine, DeterministicSupplierQuotationEngine
 from docflow_worker.engines.deterministic_supplier_invoice_multipage import (
     DeterministicSupplierInvoiceMultipageEngine,
 )
@@ -9,12 +9,13 @@ from docflow_worker.generic_invoice_recovery import apply_generic_invoice_recove
 from docflow_worker.invoice_layout_fallbacks import apply_split_item_row_fallback
 from docflow_worker.invoice_tax_fallbacks import apply_explicit_no_vat_fallback
 from docflow_worker.models import DocumentContent, StructuredExtractionResult
+from docflow_worker.purchase_order_models import PurchaseOrderData
 from docflow_worker.supplier_invoice_models import SupplierInvoiceData
 from docflow_worker.supplier_quotation_models import SupplierQuotationData
-from docflow_worker.validators import SupplierInvoiceValidator, SupplierQuotationValidator
+from docflow_worker.validators import PurchaseOrderValidator, SupplierInvoiceValidator, SupplierQuotationValidator
 
 
-SUPPORTED_DOCUMENT_TYPES = ("supplier_quotation", "supplier_invoice")
+SUPPORTED_DOCUMENT_TYPES = ("supplier_quotation", "supplier_invoice", "purchase_order")
 
 
 async def extract_structured_document(
@@ -35,6 +36,14 @@ async def extract_structured_document(
         )
         quotation = SupplierQuotationData.model_validate(result.data)
         validation = SupplierQuotationValidator().validate(quotation)
+    elif resolved_document_type == "purchase_order":
+        result = await DeterministicPurchaseOrderEngine().extract(
+            content,
+            document_name=document_name,
+        )
+        purchase_order = PurchaseOrderData.model_validate(result.data)
+        result.data = purchase_order.model_dump()
+        validation = PurchaseOrderValidator().validate(purchase_order)
     elif resolved_document_type == "supplier_invoice":
         result = await DeterministicSupplierInvoiceMultipageEngine().extract(
             content,
