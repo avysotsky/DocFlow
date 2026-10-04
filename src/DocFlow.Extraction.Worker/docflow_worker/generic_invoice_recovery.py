@@ -250,9 +250,12 @@ def apply_generic_invoice_recovery(
             or (candidate_reconciles and not existing_reconciles)
             or len(recovered_items) > len(invoice.items)
             or (
-                vertical_items
-                and same_numeric_items
+                same_numeric_items
                 and _descriptions_are_more_complete(recovered_items, invoice.items)
+                and (
+                    bool(vertical_items)
+                    or _has_wrapped_business_item_header(content)
+                )
             )
             or (
                 len(recovered_items) == len(invoice.items)
@@ -423,9 +426,14 @@ def _date_label_matches(normalized_line: str, label: str) -> bool:
 
 
 def _parse_date_from_text(value: str) -> date | None:
-    normalized = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", value)
+    normalized = re.sub(
+        r"\b(\d{1,2})(?:st|nd|rd|th)\b",
+        r"\1",
+        value,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", normalized)
     normalized = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", normalized)
-    normalized = re.sub(r"\b(\d{1,2})\s*(?:st|nd|rd|th)\b", r"\1", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\s+'(?=\d{2}\b)", " ", normalized)
 
     for pattern in _DATE_PATTERNS:
@@ -1088,6 +1096,27 @@ def _parse_vertical_number(value: str) -> Decimal | None:
     return number
 
 
+def _has_wrapped_business_item_header(content: DocumentContent) -> bool:
+    for line in content.text.splitlines():
+        normalized = _normalize(line)
+        if (
+            "activity" in normalized
+            and "qty" in normalized
+            and "rate" in normalized
+            and "amount" in normalized
+        ):
+            return True
+        if (
+            "description" in normalized
+            and "quantity" in normalized
+            and "unit price" in normalized
+            and "discount" in normalized
+            and "amount" in normalized
+        ):
+            return True
+    return False
+
+
 def _same_numeric_items(
     left: list[SupplierInvoiceItem],
     right: list[SupplierInvoiceItem],
@@ -1173,7 +1202,10 @@ def _recover_layout_items(content: DocumentContent) -> list[SupplierInvoiceItem]
                     next_has_alpha = bool(re.search(r"[A-Za-z]", next_line))
                     if (
                         next_line
-                        and not next_has_alpha
+                        and (
+                            not next_has_alpha
+                            or profile.description_side == "pending"
+                        )
                         and _parse_profile_row(
                             next_line,
                             profile,
