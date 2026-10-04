@@ -29,7 +29,9 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             currency=self._extract_currency(content.text),
         )
 
-        po.items = self._extract_table_items(content)
+        po.items = self._extract_vertical_net_amount_items(content)
+        if not po.items:
+            po.items = self._extract_table_items(content)
         if not po.items:
             po.items = self._extract_text_items(content)
         if not po.items:
@@ -46,6 +48,144 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             data=po.model_dump(),
             confidence=None,
         )
+
+    @classmethod
+    def _extract_vertical_net_amount_items(
+        cls,
+        content: DocumentContent,
+    ) -> list[PurchaseOrderItem]:
+        """Parse UKRI-style PO tables whose headers and cells are emitted vertically.
+
+        This layout often has blank Quantity/UOM columns. Percent tax values must
+        never be interpreted as line totals.
+        """
+        recovered: list[PurchaseOrderItem] = []
+
+        for page in content.pages:
+            lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+            normalized = [cls._normalize(line) for line in lines]
+
+            header_start = next(
+                (
+                    index
+                    for index, value in enumerate(normalized)
+                    if value == "line"
+                    and "part number description" in " ".join(normalized[index:index + 4])
+                    and "net amount" in " ".join(normalized[index:index + 12])
+                ),
+                None,
+            )
+            if header_start is None:
+                continue
+
+            data_start = header_start
+            for index in range(header_start, min(len(lines), header_start + 14)):
+                if "net amount" in normalized[index]:
+                    data_start = min(index + 2, len(lines))
+                    break
+
+            items: list[PurchaseOrderItem] = []
+            trailing_amounts: list[Decimal] = []
+            index = data_start
+
+            while index < len(lines):
+                current = normalized[index]
+                if current.startswith("grand total"):
+                    break
+
+                if current.startswith("total"):
+                    cursor = index
+                    while cursor < len(lines):
+                        candidate = lines[cursor]
+                        candidate_normalized = normalized[cursor]
+                        if candidate_normalized.startswith("grand total"):
+                            break
+                        if "%" not in candidate:
+                            value = cls._parse_decimal(candidate)
+                            if value is not None:
+                                trailing_amounts.append(value)
+                        cursor += 1
+                    break
+
+                if not re.fullmatch(r"\d+", lines[index]):
+                    index += 1
+                    continue
+
+                line_number = lines[index]
+                cursor = index + 1
+                description_parts: list[str] = []
+                delivery_date: date | None = None
+                unit: str | None = None
+                numeric_values: list[Decimal] = []
+
+                while cursor < len(lines):
+                    candidate = lines[cursor]
+                    candidate_normalized = normalized[cursor]
+
+                    if re.fullmatch(r"\d+", candidate):
+                        break
+                    if candidate_normalized.startswith(("total", "grand total")):
+                        break
+
+                    parsed_date = cls._parse_date(candidate)
+                    if parsed_date is not None:
+                        delivery_date = parsed_date
+                        cursor += 1
+                        continue
+
+                    if cls._looks_like_unit(candidate):
+                        unit = candidate
+                        cursor += 1
+                        continue
+
+                    if "%" in candidate:
+                        cursor += 1
+                        continue
+
+                    numeric = cls._parse_decimal(candidate)
+                    if numeric is not None and not re.search(r"[A-Za-z]", candidate):
+                        numeric_values.append(numeric)
+                        cursor += 1
+                        continue
+
+                    if re.search(r"[A-Za-z]", candidate):
+                        description_parts.append(candidate)
+
+                    cursor += 1
+
+                description = " ".join(description_parts).strip()
+                if description:
+                    unit_price = numeric_values[0] if len(numeric_values) >= 2 else None
+                    line_total = numeric_values[-1] if numeric_values else None
+                    items.append(
+                        PurchaseOrderItem(
+                            line_number=line_number,
+                            description=" ".join(description.split()),
+                            need_by_date=delivery_date,
+                            quantity=None,
+                            unit=unit,
+                            unit_price=unit_price,
+                            line_total=line_total,
+                        )
+                    )
+
+                index = max(cursor, index + 1)
+
+            # Some sparse PDFs emit all Net Amount values below the item rows.
+            if (
+                items
+                and trailing_amounts
+                and len(trailing_amounts) >= len(items)
+            ):
+                candidate_totals = trailing_amounts[-len(items):]
+                for item, line_total in zip(items, candidate_totals):
+                    if item.line_total is None:
+                        item.line_total = line_total
+
+            recovered.extend(items)
+
+        return cls._deduplicate_items(recovered)
+
 
     @classmethod
     def _extract_table_items(cls, content: DocumentContent) -> list[PurchaseOrderItem]:
@@ -782,6 +922,8 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             "%Y-%m-%d",
             "%d/%m/%Y",
             "%d/%m/%y",
+            "%d/%b/%Y",
+            "%d/%b/%y",
             "%d.%m.%Y",
         ):
             try:
