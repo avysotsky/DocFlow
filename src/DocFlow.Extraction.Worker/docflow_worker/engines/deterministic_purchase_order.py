@@ -440,45 +440,61 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
 
     @classmethod
     def _extract_supplier_name(cls, content: DocumentContent) -> str | None:
-        lines = [line.strip() for line in content.text.splitlines() if line.strip()]
+        lines = [line.rstrip() for line in content.text.splitlines() if line.strip()]
 
-        labels = (
-            "supplier name and address",
-            "supplier",
-            "to",
-        )
-        for index, line in enumerate(lines):
-            normalized = cls._normalize(line)
-
-            same_line = re.match(
-                r"^(?:supplier|to)\s*:\s*(?P<value>.+)$",
+        for line in lines:
+            match = re.match(
+                r"^\s*(?:supplier|to)[ \t]*:[ \t]*(?P<value>.+?)\s*$",
                 line,
                 flags=re.IGNORECASE,
             )
-            if same_line:
-                value = same_line.group("value").strip()
+            if match:
+                value = match.group("value").strip()
                 if value:
                     return cls._clean_supplier_name(value)
 
-            if normalized not in labels:
+        for index, line in enumerate(lines):
+            cells = [
+                cell.strip()
+                for cell in re.split(r"[ \t]{2,}", line.strip())
+                if cell.strip()
+            ]
+            normalized_cells = [cls._normalize(cell) for cell in cells]
+
+            supplier_column = next(
+                (
+                    column
+                    for column, value in enumerate(normalized_cells)
+                    if value in {"supplier", "supplier name and address"}
+                    or value.startswith("supplier name and address")
+                ),
+                None,
+            )
+            if supplier_column is None:
                 continue
 
-            for candidate in lines[index + 1 : index + 5]:
-                candidate_normalized = cls._normalize(candidate)
-                if not candidate_normalized:
+            for candidate_line in lines[index + 1 : index + 6]:
+                candidate_cells = [
+                    cell.strip()
+                    for cell in re.split(r"[ \t]{2,}", candidate_line.strip())
+                    if cell.strip()
+                ]
+                if not candidate_cells:
                     continue
-                if any(
-                    candidate_normalized.startswith(prefix)
-                    for prefix in (
-                        "delivery address",
-                        "all invoices",
-                        "invoice to",
-                        "deliver to",
-                    )
+
+                candidate = (
+                    candidate_cells[supplier_column]
+                    if supplier_column < len(candidate_cells)
+                    else candidate_cells[0]
+                )
+                normalized = cls._normalize(candidate)
+                if not re.search(r"[A-Za-z]", candidate):
+                    continue
+                if normalized.startswith(
+                    ("delivery address", "all invoices", "invoice to", "deliver to")
                 ):
                     break
-                if re.search(r"[A-Za-z]", candidate):
-                    return cls._clean_supplier_name(candidate)
+                return cls._clean_supplier_name(candidate)
 
         return None
 
