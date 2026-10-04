@@ -1,5 +1,5 @@
+import argparse
 from pathlib import Path
-import sys
 
 import pymupdf
 
@@ -25,7 +25,13 @@ def draw_table(page, x_positions, y_positions, rows, font_size=7):
 
 
 def main() -> None:
-    output_path = Path(sys.argv[1] if len(sys.argv) > 1 else "supplier-invoice.pdf")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("output", nargs="?", default="supplier-invoice.pdf")
+    parser.add_argument("--invoice-number", default="INV-2026-091")
+    parser.add_argument("--supplier-name", default="ACME Components Ltd.")
+    args = parser.parse_args()
+
+    output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     document = pymupdf.open()
@@ -33,7 +39,7 @@ def main() -> None:
 
     page.insert_textbox(
         pymupdf.Rect(30, 20, 360, 75),
-        "ACME Components Ltd.\nVAT ID: DE314159265\nbilling@acme-components.example",
+        f"{args.supplier_name}\nVAT ID: DE314159265\nbilling@acme-components.example",
         fontsize=9,
     )
     page.insert_textbox(
@@ -44,7 +50,7 @@ def main() -> None:
     )
 
     metadata_rows = [
-        ["Invoice No.", "INV-2026-091", "Currency", "EUR"],
+        ["Invoice No.", args.invoice_number, "Currency", "EUR"],
         ["Invoice Date", "2026-09-30", "Due Date", "2026-10-30"],
         ["Customer Ref.", "PO-78421", "PO No.", "PO-78421"],
     ]
