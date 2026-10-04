@@ -193,6 +193,84 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
         return cls._deduplicate_items(items)
 
     @classmethod
+    def _extract_partial_text_items(
+        cls,
+        content: DocumentContent,
+    ) -> list[PurchaseOrderItem]:
+        items: list[PurchaseOrderItem] = []
+
+        for page in content.pages:
+            lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+            in_item_section = False
+            pending_description: list[str] = []
+            pending_unit: str | None = None
+
+            for line in lines:
+                normalized = cls._normalize(line)
+
+                if cls._looks_like_item_header(normalized):
+                    in_item_section = True
+                    pending_description = []
+                    pending_unit = None
+                    continue
+
+                if not in_item_section:
+                    continue
+
+                if cls._is_item_section_terminator(normalized):
+                    in_item_section = False
+                    pending_description = []
+                    pending_unit = None
+                    continue
+
+                need_by = re.search(
+                    r"\bneed\s+by\s+date\s+(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})\b",
+                    line,
+                    flags=re.IGNORECASE,
+                )
+                if need_by and pending_description:
+                    description = " ".join(pending_description).strip()
+                    if description:
+                        items.append(
+                            PurchaseOrderItem(
+                                description=description,
+                                need_by_date=cls._parse_date(need_by.group("date")),
+                                unit=pending_unit,
+                            )
+                        )
+                    pending_description = []
+                    pending_unit = None
+                    continue
+
+                if not cls._is_description_line(line):
+                    continue
+
+                cells = [
+                    cell.strip()
+                    for cell in re.split(r"[ \t]{2,}", line)
+                    if cell.strip()
+                ]
+                if not cells:
+                    continue
+
+                if cls._looks_like_unit(cells[-1]):
+                    pending_unit = cells[-1]
+                    cells = cells[:-1]
+
+                if len(cells) >= 2 and re.fullmatch(
+                    r"[A-Z0-9._/-]{2,}",
+                    cells[0],
+                    flags=re.IGNORECASE,
+                ) and any(character.isdigit() for character in cells[0]):
+                    cells = cells[1:]
+
+                description = " ".join(cells).strip()
+                if description:
+                    pending_description.append(description)
+
+        return cls._deduplicate_items(items)
+
+    @classmethod
     def _parse_text_item_line(
         cls,
         line: str,
@@ -311,13 +389,12 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
     @staticmethod
     def _looks_like_unit(value: str) -> bool:
         normalized = DeterministicPurchaseOrderEngine._normalize(value)
-        return normalized in {
+        if normalized in {
             "each",
             "ea",
             "unit",
             "units",
             "pack",
-            "pack 10",
             "box",
             "lot",
             "day",
@@ -325,7 +402,9 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             "hour",
             "hours",
             "service",
-        }
+        }:
+            return True
+        return bool(re.fullmatch(r"pack \d+", normalized))
 
     @classmethod
     def _extract_po_number(cls, text: str) -> str | None:
