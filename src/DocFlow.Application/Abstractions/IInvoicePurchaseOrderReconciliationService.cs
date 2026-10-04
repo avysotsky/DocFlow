@@ -41,7 +41,7 @@ public sealed record InvoicePoReconciliationReport(
     Guid InvoiceDocumentId,
     Guid PurchaseOrderDocumentId,
     string Status,
-    ReconciliationFieldCheck PurchaseOrderNumberCheck,
+    IReadOnlyList<ReconciliationFieldCheck> DocumentChecks,
     IReadOnlyList<ReconciliationItemResult> InvoiceItems,
     IReadOnlyList<int> UnmatchedPurchaseOrderItemIndexes,
     int PassedChecks,
