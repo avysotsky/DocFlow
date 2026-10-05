@@ -18,6 +18,8 @@ public sealed class DocFlowDbContext : DbContext
     public DbSet<DocumentCompletionEvent> DocumentCompletionEvents => Set<DocumentCompletionEvent>();
     public DbSet<ReconciliationCase> ReconciliationCases => Set<ReconciliationCase>();
     public DbSet<ReconciliationCaseAuditEvent> ReconciliationCaseAuditEvents => Set<ReconciliationCaseAuditEvent>();
+    public DbSet<MailboxMessageRecord> MailboxMessages => Set<MailboxMessageRecord>();
+    public DbSet<MailboxAttachmentRecord> MailboxAttachments => Set<MailboxAttachmentRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
