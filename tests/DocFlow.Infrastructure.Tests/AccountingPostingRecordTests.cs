@@ -13,11 +13,13 @@ public sealed class AccountingPostingRecordTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             "  LOCAL-TEST  ",
+            " primary-ledger ",
             "tenant-ledger",
             "posting-key-1",
             """{"document_type":"supplier_invoice"}""");
 
         Assert.Equal("local-test", record.Provider);
+        Assert.Equal("primary-ledger", record.TargetKey);
     }
 
     [Fact]
@@ -138,6 +140,7 @@ public sealed class AccountingPostingRecordTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             "fake-accounting",
+            "primary-ledger",
             "tenant-ledger",
             "posting-key-1",
             """{"document_type":"supplier_invoice"}""");
