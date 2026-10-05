@@ -779,6 +779,22 @@ jobs:
             and (.structuredData.data.items | length) == 5
           ' >/dev/null
 
+          echo "Scenario 6a.0: accounting targets are tenant-scoped and hide external account ids"
+          primary_targets_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            http://127.0.0.1:5080/api/accounting-postings/targets)
+          printf '%s' "$primary_targets_json" | jq -e '
+            length == 1
+            and .[0].key == "primary-ledger"
+            and .[0].provider == "local-test"
+            and (.[0] | has("targetAccount") | not)
+          ' >/dev/null
+
+          other_targets_json=$(curl -fsS \
+            -H "X-DocFlow-Api-Key: $other_api_key" \
+            http://127.0.0.1:5080/api/accounting-postings/targets)
+          printf '%s' "$other_targets_json" | jq -e 'length == 0' >/dev/null
+
           echo "Scenario 6a: processed supplier invoice posts idempotently through local accounting adapter"
           posting_code=$(curl -sS -D /tmp/accounting-posting.headers -o /tmp/accounting-posting.json -w '%{http_code}' \
             "${auth_header[@]}" \
