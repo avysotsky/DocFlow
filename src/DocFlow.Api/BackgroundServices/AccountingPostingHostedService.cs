@@ -75,6 +75,28 @@ public sealed class AccountingPostingHostedService : BackgroundService
                 StringComparer.OrdinalIgnoreCase);
 
         var now = DateTimeOffset.UtcNow;
+        var staleBefore = now.AddSeconds(-_options.InProgressTimeoutSeconds);
+
+        var interruptedPostings = await dbContext.AccountingPostingRecords
+            .Where(item =>
+                item.Status == AccountingPostingStatus.Posting
+                && item.LastAttemptAt != null
+                && item.LastAttemptAt <= staleBefore)
+            .OrderBy(item => item.LastAttemptAt)
+            .Take(_options.BatchSize)
+            .ToListAsync(stoppingToken);
+
+        foreach (var interrupted in interruptedPostings)
+        {
+            interrupted.RecoverInterruptedAttempt(now);
+            _logger.LogWarning(
+                "Recovered interrupted accounting posting {PostingId}; attempts={Attempts}.",
+                interrupted.Id,
+                interrupted.Attempts);
+        }
+
+        if (interruptedPostings.Count > 0)
+            await dbContext.SaveChangesAsync(stoppingToken);
 
         var postings = await dbContext.AccountingPostingRecords
             .Where(item =>
