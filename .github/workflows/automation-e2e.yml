@@ -25,6 +25,10 @@ on:
       - '.github/workflows/automation-e2e.yml'
   workflow_dispatch:
 
+concurrency:
+  group: automation-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
