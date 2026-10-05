@@ -37,6 +37,7 @@ public sealed class AccountingBillPayloadFactoryTests
             "discount_amount": null,
             "tax_inclusive": false,
             "subtotal": "1457.00",
+            "vat_rate": "20",
             "vat_amount": "291.40",
             "tax_breakdown": [
               {
