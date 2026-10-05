@@ -21,7 +21,7 @@ public sealed record AccountingPostingSnapshot(
     Guid CustomerId,
     Guid DocumentId,
     string Provider,
-    string TargetAccount,
+    string TargetKey,
     string IdempotencyKey,
     AccountingPostingStatus Status,
     int Attempts,
