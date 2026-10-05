@@ -10,13 +10,16 @@ namespace DocFlow.Infrastructure.Processing;
 public sealed class AccountingPostingService : IAccountingPostingService
 {
     private readonly DocFlowDbContext _dbContext;
+    private readonly IAccountingBillPayloadFactory _payloadFactory;
     private readonly IReadOnlyDictionary<string, IAccountingPostingAdapter> _adapters;
 
     public AccountingPostingService(
         DocFlowDbContext dbContext,
+        IAccountingBillPayloadFactory payloadFactory,
         IEnumerable<IAccountingPostingAdapter> adapters)
     {
         _dbContext = dbContext;
+        _payloadFactory = payloadFactory;
         _adapters = adapters.ToDictionary(
             adapter => adapter.Provider,
             StringComparer.OrdinalIgnoreCase);
@@ -84,9 +87,20 @@ public sealed class AccountingPostingService : IAccountingPostingService
                 AccountingPostingCreateOutcome.ExtractionResultNotFound);
         }
 
-        var payloadJson = ReviewedStructuredDataComposer.Compose(
+        var effectiveStructuredDataJson = ReviewedStructuredDataComposer.Compose(
             source.ExtractionResult.StructuredDataJson,
             source.Review);
+
+        var payloadBuild = _payloadFactory.Build(effectiveStructuredDataJson);
+        if (payloadBuild.Outcome != AccountingBillPayloadBuildOutcome.Completed
+            || payloadBuild.Payload is null)
+        {
+            return new AccountingPostingCreateResult(
+                AccountingPostingCreateOutcome.InvalidPayload);
+        }
+
+        var payloadJson = AccountingBillPayloadJson.Serialize(
+            payloadBuild.Payload);
 
         var existing = await FindByIdempotencyScopeAsync(
             customerId,
