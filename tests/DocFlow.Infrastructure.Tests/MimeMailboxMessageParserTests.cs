@@ -130,7 +130,7 @@ Content-Disposition: attachment; filename="notes.txt"
 Content-Transfer-Encoding: base64
 
 bm90ZXM=
-"""
+""" + "\n"
             : string.Empty;
 
         var raw = $"""
