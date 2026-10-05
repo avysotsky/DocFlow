@@ -512,6 +512,32 @@ jobs:
             and all(.invoiceItems[]; .status == "Passed" and .matchMethod == "sku_reference")
           ' >/dev/null
 
+          echo "Scenario 6b.1: matching reconciliation persists as an Open review case"
+          match_case_json=$(curl -fsS             "${auth_header[@]}"             -H 'Content-Type: application/json'             -X POST             -d "{\"invoiceDocumentId\":\"$invoice_document_id\",\"purchaseOrderDocumentId\":\"$po_document_id\"}"             http://127.0.0.1:5080/api/reconciliation/invoice-po/cases)
+
+          match_case_id=$(printf '%s' "$match_case_json" | jq -r '.id')
+          test -n "$match_case_id"
+          test "$match_case_id" != "null"
+          printf '%s' "$match_case_json" | jq -e '
+            .reconciliationStatus == "Match"
+            and .reviewStatus == "Open"
+            and .createdByClient == "e2e-primary"
+            and .report.status == "Match"
+            and (.report.invoiceItems | length) == 5
+          ' >/dev/null
+
+          persisted_match_case_json=$(curl -fsS             "${auth_header[@]}"             "http://127.0.0.1:5080/api/reconciliation/cases/$match_case_id")
+
+          test "$(printf '%s' "$persisted_match_case_json" | jq -r '.id')" = "$match_case_id"
+          printf '%s' "$persisted_match_case_json" | jq -e '
+            .reconciliationStatus == "Match"
+            and .reviewStatus == "Open"
+            and .report.status == "Match"
+          ' >/dev/null
+
+          other_tenant_case_code=$(curl -sS -o /dev/null -w '%{http_code}'             -H "X-DocFlow-Api-Key: $other_api_key"             "http://127.0.0.1:5080/api/reconciliation/cases/$match_case_id")
+          test "$other_tenant_case_code" = "404"
+
           echo "Scenario 6c: valid but differently priced PO produces auditable NeedsReview"
           mismatch_po_upload_json=$(curl -fsS \
             "${auth_header[@]}" \
@@ -537,6 +563,21 @@ jobs:
             and any(.invoiceItems[0].checks[]; .field == "unit_price" and .status == "NeedsReview" and .invoiceValue == "12.5" and .purchaseOrderValue == "13.5")
             and any(.invoiceItems[0].checks[]; .field == "line_total" and .status == "NeedsReview" and .invoiceValue == "250" and .purchaseOrderValue == "270")
             and all(.invoiceItems[1:][]; .status == "Passed")
+          ' >/dev/null
+
+          echo "Scenario 6c.1: mismatch persists as a NeedsReview case with evidence"
+          mismatch_case_json=$(curl -fsS             "${auth_header[@]}"             -H 'Content-Type: application/json'             -X POST             -d "{\"invoiceDocumentId\":\"$invoice_document_id\",\"purchaseOrderDocumentId\":\"$mismatch_po_document_id\"}"             http://127.0.0.1:5080/api/reconciliation/invoice-po/cases)
+
+          mismatch_case_id=$(printf '%s' "$mismatch_case_json" | jq -r '.id')
+          test -n "$mismatch_case_id"
+          test "$mismatch_case_id" != "null"
+          printf '%s' "$mismatch_case_json" | jq -e '
+            .reconciliationStatus == "NeedsReview"
+            and .reviewStatus == "NeedsReview"
+            and .createdByClient == "e2e-primary"
+            and .report.status == "NeedsReview"
+            and any(.report.invoiceItems[0].checks[]; .field == "unit_price" and .status == "NeedsReview" and .delta == "-1")
+            and any(.report.invoiceItems[0].checks[]; .field == "line_total" and .status == "NeedsReview" and .delta == "-20")
           ' >/dev/null
 
           echo "Scenario 7: persisted extraction result exports to CSV and XLSX"
