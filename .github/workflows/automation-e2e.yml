@@ -829,7 +829,7 @@ jobs:
           posting_db_state=$(docker run --rm --network host \
             -e PGPASSWORD=postgres postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
-            "SELECT COUNT(*),MIN(\"Status\"),MIN(\"Attempts\"),MIN(COALESCE(\"ExternalReference\",'')),MIN(\"PayloadJson\"::jsonb #>> '{schemaVersion}'),MIN(\"PayloadJson\"::jsonb #>> '{invoiceNumber}'),MIN(\"PayloadJson\"::jsonb #>> '{supplierName}'),MIN(\"PayloadJson\"::jsonb #>> '{currency}'),MIN(\"PayloadJson\"::jsonb #>> '{total}'),MIN(jsonb_array_length(\"PayloadJson\"::jsonb -> 'lines')) FROM \"AccountingPostingRecords\" WHERE \"CustomerId\"='$customer_id' AND \"Provider\"='local-test' AND \"TargetAccount\"='e2e-ledger' AND \"IdempotencyKey\"='invoice-posting-001';")
+            "SELECT COUNT(*),MIN(\"Status\"),MIN(\"Attempts\"),MIN(COALESCE(\"ExternalReference\",'')),MIN(\"PayloadJson\"::jsonb #>> '{schemaVersion}'),MIN(\"PayloadJson\"::jsonb #>> '{invoiceNumber}'),MIN(\"PayloadJson\"::jsonb #>> '{supplierName}'),MIN(\"PayloadJson\"::jsonb #>> '{currency}'),MIN(\"PayloadJson\"::jsonb #>> '{taxRate}'),MIN(\"PayloadJson\"::jsonb #>> '{total}'),MIN(jsonb_array_length(\"PayloadJson\"::jsonb -> 'lines')) FROM \"AccountingPostingRecords\" WHERE \"CustomerId\"='$customer_id' AND \"Provider\"='local-test' AND \"TargetAccount\"='e2e-ledger' AND \"IdempotencyKey\"='invoice-posting-001';")
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f1)" = "1"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f2)" = "Posted"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f3)" = "1"
@@ -837,8 +837,9 @@ jobs:
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f6)" = "INV-2026-091"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f7)" = "ACME Components Ltd."
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f8)" = "EUR"
-          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f9)" = "1748.40"
-          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f10)" = "5"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f9)" = "20"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f10)" = "1748.40"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f11)" = "5"
 
           echo "Scenario 6a.1: durable pending accounting posting is completed by background worker"
           worker_posting_id='55555555-5555-4555-8555-555555555551'
