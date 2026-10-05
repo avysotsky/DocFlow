@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DocFlow.Application.Abstractions;
 
 public sealed record ParsedMailboxPdfAttachment(
@@ -24,6 +26,7 @@ public interface IMailboxMessageParser
         CancellationToken cancellationToken = default);
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum MailboxMessageIngestionOutcome
 {
     Accepted,
