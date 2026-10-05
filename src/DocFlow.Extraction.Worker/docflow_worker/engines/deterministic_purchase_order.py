@@ -54,10 +54,11 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
         cls,
         content: DocumentContent,
     ) -> list[PurchaseOrderItem]:
-        """Parse UKRI-style PO tables whose headers and cells are emitted vertically.
+        """Parse sparse UKRI-style Net Amount tables without inventing values.
 
-        This layout often has blank Quantity/UOM columns. Percent tax values must
-        never be interpreted as line totals.
+        Real PDFs may preserve the whole header/row on one text line or emit every
+        cell vertically. Quantity/UOM can legitimately be blank. Tax percentages
+        are never interpreted as monetary values.
         """
         recovered: list[PurchaseOrderItem] = []
 
@@ -69,100 +70,110 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                 (
                     index
                     for index, value in enumerate(normalized)
-                    if value == "line"
-                    and "part number description" in " ".join(normalized[index:index + 4])
-                    and "net amount" in " ".join(normalized[index:index + 12])
+                    if "part number description" in value
+                    and (
+                        "net amount" in value
+                        or "net amount" in " ".join(normalized[index:index + 10])
+                    )
                 ),
                 None,
             )
             if header_start is None:
                 continue
 
-            data_start = header_start
-            for index in range(header_start, min(len(lines), header_start + 14)):
-                if "net amount" in normalized[index]:
-                    data_start = min(index + 2, len(lines))
+            # Skip header continuation lines until the first numbered item row.
+            index = header_start + 1
+            while index < len(lines):
+                if re.match(r"^\d+(?:\s+|$)", lines[index]):
                     break
+                if cls._normalize(lines[index]).startswith(("total", "grand total")):
+                    break
+                index += 1
 
             items: list[PurchaseOrderItem] = []
-            trailing_amounts: list[Decimal] = []
-            index = data_start
-
             while index < len(lines):
-                current = normalized[index]
-                if current.startswith("grand total"):
+                if cls._normalize(lines[index]).startswith(("total", "grand total")):
                     break
 
-                if current.startswith("total"):
-                    cursor = index
-                    while cursor < len(lines):
-                        candidate = lines[cursor]
-                        candidate_normalized = normalized[cursor]
-                        if candidate_normalized.startswith("grand total"):
-                            break
-                        if "%" not in candidate:
-                            value = cls._parse_decimal(candidate)
-                            if value is not None:
-                                trailing_amounts.append(value)
-                        cursor += 1
-                    break
-
-                if not re.fullmatch(r"\d+", lines[index]):
+                row_match = re.match(r"^(?P<line>\d+)(?:\s+(?P<rest>.*))?$", lines[index])
+                if row_match is None:
                     index += 1
                     continue
 
-                line_number = lines[index]
+                line_number = row_match.group("line")
+                row_parts: list[str] = []
+                if row_match.group("rest"):
+                    row_parts.append(row_match.group("rest").strip())
+
                 cursor = index + 1
+                while cursor < len(lines):
+                    candidate = lines[cursor]
+                    if re.match(r"^\d+(?:\s+|$)", candidate):
+                        break
+                    if cls._normalize(candidate).startswith(("total", "grand total")):
+                        break
+                    row_parts.append(candidate)
+                    cursor += 1
+
+                cells: list[str] = []
+                for part in row_parts:
+                    cells.extend(
+                        cell.strip()
+                        for cell in re.split(r"[ \t]{2,}", part)
+                        if cell.strip()
+                    )
+
                 description_parts: list[str] = []
                 delivery_date: date | None = None
                 unit: str | None = None
                 numeric_values: list[Decimal] = []
 
-                while cursor < len(lines):
-                    candidate = lines[cursor]
-                    candidate_normalized = normalized[cursor]
-
-                    if re.fullmatch(r"\d+", candidate):
-                        break
-                    if candidate_normalized.startswith(("total", "grand total")):
-                        break
-
-                    parsed_date = cls._parse_date(candidate)
+                for cell in cells:
+                    parsed_date = cls._parse_date(cell)
                     if parsed_date is not None:
                         delivery_date = parsed_date
-                        cursor += 1
                         continue
 
-                    if cls._looks_like_unit(candidate):
-                        unit = candidate
-                        cursor += 1
+                    if "%" in cell:
                         continue
 
-                    if "%" in candidate:
-                        cursor += 1
+                    if cls._looks_like_unit(cell):
+                        unit = cell
                         continue
 
-                    numeric = cls._parse_decimal(candidate)
-                    if numeric is not None and not re.search(r"[A-Za-z]", candidate):
-                        numeric_values.append(numeric)
-                        cursor += 1
+                    if re.fullmatch(r"[-+]?\d[\d,]*(?:\.\d+)?", cell):
+                        numeric = cls._parse_decimal(cell)
+                        if numeric is not None:
+                            numeric_values.append(numeric)
                         continue
 
-                    if re.search(r"[A-Za-z]", candidate):
-                        description_parts.append(candidate)
-
-                    cursor += 1
+                    if re.search(r"[A-Za-z]", cell):
+                        description_parts.append(cell)
 
                 description = " ".join(description_parts).strip()
                 if description:
-                    unit_price = numeric_values[0] if len(numeric_values) >= 2 else None
-                    line_total = numeric_values[-1] if numeric_values else None
+                    quantity: Decimal | None = None
+                    unit_price: Decimal | None = None
+                    line_total: Decimal | None = None
+
+                    if len(numeric_values) >= 3:
+                        quantity = numeric_values[0]
+                        unit_price = numeric_values[-2]
+                        line_total = numeric_values[-1]
+                    elif len(numeric_values) == 2:
+                        unit_price = numeric_values[0]
+                        line_total = numeric_values[1]
+                    elif len(numeric_values) == 1:
+                        # One monetary-looking value is ambiguous in a sparse row.
+                        # Preserve it only as line total when no unit price can be proven.
+                        line_total = numeric_values[0]
+
                     items.append(
                         PurchaseOrderItem(
                             line_number=line_number,
                             description=" ".join(description.split()),
                             need_by_date=delivery_date,
-                            quantity=None,
+                            quantity=quantity,
                             unit=unit,
                             unit_price=unit_price,
                             line_total=line_total,
@@ -171,21 +182,9 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
 
                 index = max(cursor, index + 1)
 
-            # Some sparse PDFs emit all Net Amount values below the item rows.
-            if (
-                items
-                and trailing_amounts
-                and len(trailing_amounts) >= len(items)
-            ):
-                candidate_totals = trailing_amounts[-len(items):]
-                for item, line_total in zip(items, candidate_totals):
-                    if item.line_total is None:
-                        item.line_total = line_total
-
             recovered.extend(items)
 
         return cls._deduplicate_items(recovered)
-
 
     @classmethod
     def _extract_table_items(cls, content: DocumentContent) -> list[PurchaseOrderItem]:
@@ -736,8 +735,16 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
     @classmethod
     def _extract_order_date(cls, text: str) -> date | None:
         patterns = (
-            re.compile(r"\border\s+date\s*[:#]?\s*(?P<value>\d{1,2}-[A-Za-z]{3}-\d{2,4})", re.IGNORECASE),
-            re.compile(r"\bdate\s*:\s*(?P<value>\d{1,2}-[A-Za-z]{3}-\d{2,4})", re.IGNORECASE),
+            re.compile(
+                r"\border\s+date\s*[:#]?\s*"
+                r"(?P<value>\d{1,2}(?:-|/)[A-Za-z]{3}(?:-|/)\d{2,4})",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r"\bdate\s*:\s*"
+                r"(?P<value>\d{1,2}(?:-|/)[A-Za-z]{3}(?:-|/)\d{2,4})",
+                re.IGNORECASE,
+            ),
         )
         for pattern in patterns:
             match = pattern.search(text)
