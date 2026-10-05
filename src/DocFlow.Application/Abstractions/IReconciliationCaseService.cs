@@ -1,4 +1,31 @@
+using System.Text.Json.Serialization;
+
 namespace DocFlow.Application.Abstractions;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ReconciliationReviewDecision
+{
+    Approve,
+    Reject,
+    Resolve
+}
+
+public enum ReconciliationCaseDecisionOutcome
+{
+    Completed,
+    NotFound,
+    InvalidTransition,
+    NoteRequired
+}
+
+public sealed record ReconciliationCaseAuditEntry(
+    Guid Id,
+    string Action,
+    string? PreviousStatus,
+    string NewStatus,
+    string? Note,
+    string PerformedByClient,
+    DateTimeOffset OccurredAt);
 
 public sealed record ReconciliationCaseSnapshot(
     Guid Id,
@@ -10,10 +37,15 @@ public sealed record ReconciliationCaseSnapshot(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     string CreatedByClient,
-    InvoicePoReconciliationReport Report);
+    InvoicePoReconciliationReport Report,
+    IReadOnlyList<ReconciliationCaseAuditEntry> AuditHistory);
 
 public sealed record ReconciliationCaseCreateResult(
     InvoicePoReconciliationOutcome Outcome,
+    ReconciliationCaseSnapshot? Case = null);
+
+public sealed record ReconciliationCaseDecisionResult(
+    ReconciliationCaseDecisionOutcome Outcome,
     ReconciliationCaseSnapshot? Case = null);
 
 public interface IReconciliationCaseService
@@ -28,5 +60,13 @@ public interface IReconciliationCaseService
     Task<ReconciliationCaseSnapshot?> GetAsync(
         Guid customerId,
         Guid caseId,
+        CancellationToken cancellationToken = default);
+
+    Task<ReconciliationCaseDecisionResult> DecideAsync(
+        Guid customerId,
+        Guid caseId,
+        ReconciliationReviewDecision decision,
+        string? note,
+        string performedByClient,
         CancellationToken cancellationToken = default);
 }
