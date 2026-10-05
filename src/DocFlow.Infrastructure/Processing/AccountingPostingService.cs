@@ -34,7 +34,7 @@ public sealed class AccountingPostingService : IAccountingPostingService
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        var normalizedProvider = provider.Trim();
+        var normalizedProvider = provider.Trim().ToLowerInvariant();
         var normalizedTarget = targetAccount.Trim();
         var normalizedKey = idempotencyKey.Trim();
 
