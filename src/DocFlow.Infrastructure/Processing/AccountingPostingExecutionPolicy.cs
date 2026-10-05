@@ -17,7 +17,7 @@ public static class AccountingPostingExecutionPolicy
             entity.DocumentId,
             entity.TargetAccount,
             entity.IdempotencyKey,
-            entity.PayloadJson);
+            AccountingBillPayloadJson.Deserialize(entity.PayloadJson));
 
     public static void ApplyResult(
         AccountingPostingRecord entity,
