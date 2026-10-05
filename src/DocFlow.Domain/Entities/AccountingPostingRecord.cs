@@ -144,7 +144,7 @@ public sealed class AccountingPostingRecord
         string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))
-            throw new ArgumentException("Value is required.", parameterName);
+            throw new ArgumentException($"{parameterName} is required.", parameterName);
 
         var normalized = value.Trim();
         if (normalized.Length > maxLength)
