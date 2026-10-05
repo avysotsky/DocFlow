@@ -191,7 +191,7 @@ jobs:
 
           greenmail_ready=false
           for _ in $(seq 1 30); do
-            if python -c 'import socket; [socket.create_connection(("127.0.0.1", port), timeout=1).close() for port in (3025, 3143)]'; then
+            if python -c 'import imaplib, smtplib; smtp=smtplib.SMTP("127.0.0.1", 3025, timeout=2); assert smtp.noop()[0] == 250; smtp.quit(); imap=imaplib.IMAP4("127.0.0.1", 3143, timeout=2); imap.login("ap", "pwd"); assert imap.select("INBOX")[0] == "OK"; imap.logout()'; then
               greenmail_ready=true
               break
             fi
