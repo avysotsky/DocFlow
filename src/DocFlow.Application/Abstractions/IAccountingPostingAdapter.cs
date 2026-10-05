@@ -13,7 +13,7 @@ public sealed record AccountingPostingRequest(
     Guid DocumentId,
     string TargetAccount,
     string IdempotencyKey,
-    string PayloadJson);
+    AccountingBillPayload Payload);
 
 public sealed record AccountingPostingAdapterResult(
     AccountingPostingAdapterOutcome Outcome,
