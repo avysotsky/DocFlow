@@ -14,6 +14,7 @@ on:
       - '.github/scripts/generate_supplier_quotation_pdf.py'
       - '.github/scripts/generate_supplier_invoice_pdf.py'
       - '.github/scripts/generate_purchase_order_pdf.py'
+      - '.github/scripts/generate_mailbox_message.py'
       - '.github/scripts/verify_batch_idempotency.py'
       - '.github/scripts/verify_document_export.py'
       - '.github/scripts/verify_document_inbox.py'
@@ -85,6 +86,13 @@ jobs:
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/invalid-supplier-quotation.pdf 1748.42
           python .github/scripts/generate_supplier_quotation_pdf.py /tmp/borderless-supplier-quotation.pdf --borderless
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/supplier-invoice.pdf
+          python .github/scripts/generate_mailbox_message.py \
+            --pdf /tmp/supplier-invoice.pdf \
+            --output /tmp/mailbox-message.eml
+          python .github/scripts/generate_mailbox_message.py \
+            --pdf /tmp/supplier-invoice.pdf \
+            --output /tmp/mailbox-message-conflict.eml \
+            --subject "Changed payload with same Message-Id"
           python .github/scripts/generate_purchase_order_pdf.py /tmp/purchase-order.pdf
           python .github/scripts/generate_purchase_order_pdf.py /tmp/purchase-order-mismatch.pdf --mismatch-first-price
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/retention-primary-invoice.pdf --invoice-number INV-800001
@@ -248,6 +256,75 @@ jobs:
             done
             return 1
           }
+
+          echo "Scenario 0b: RFC822 mailbox message identity is tenant-scoped and idempotent"
+          mailbox_code=$(curl -sS -o /tmp/mailbox-first.json -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: message/rfc822' \
+            --data-binary @/tmp/mailbox-message.eml \
+            http://127.0.0.1:5080/api/mailbox/messages/rfc822)
+          test "$mailbox_code" = "201"
+
+          mailbox_json=$(cat /tmp/mailbox-first.json)
+          printf '%s' "$mailbox_json" | jq -e '
+            .outcome == "Accepted"
+            and .messageIdentity == "message-id:docflow-mailbox-e2e@example.test"
+            and .internetMessageId == "docflow-mailbox-e2e@example.test"
+            and .sender == "billing@example.com"
+            and .subject == "Supplier invoice from mailbox"
+            and (.pdfAttachments | length) == 1
+            and .pdfAttachments[0].ordinal == 0
+            and .pdfAttachments[0].fileName == "mailbox-invoice.pdf"
+            and .pdfAttachments[0].contentType == "application/pdf"
+            and .pdfAttachments[0].size > 0
+            and (.pdfAttachments[0].sha256 | length) == 64
+          ' >/dev/null
+          mailbox_id=$(printf '%s' "$mailbox_json" | jq -r '.mailboxMessageId')
+          test -n "$mailbox_id"
+          test "$mailbox_id" != "null"
+
+          mailbox_counts=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT (SELECT COUNT(*) FROM \"MailboxMessages\" WHERE \"Id\"='$mailbox_id' AND \"CustomerId\"='$customer_id'), (SELECT COUNT(*) FROM \"MailboxAttachments\" WHERE \"MailboxMessageId\"='$mailbox_id');")
+          test "$mailbox_counts" = "1|1"
+
+          replay_code=$(curl -sS -D /tmp/mailbox-replay.headers -o /tmp/mailbox-replay.json -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: message/rfc822' \
+            --data-binary @/tmp/mailbox-message.eml \
+            http://127.0.0.1:5080/api/mailbox/messages/rfc822)
+          test "$replay_code" = "200"
+          replay_json=$(cat /tmp/mailbox-replay.json)
+          test "$(printf '%s' "$replay_json" | jq -r '.outcome')" = "Replay"
+          test "$(printf '%s' "$replay_json" | jq -r '.mailboxMessageId')" = "$mailbox_id"
+          grep -qi '^Idempotency-Replayed: true' /tmp/mailbox-replay.headers
+
+          conflict_code=$(curl -sS -o /tmp/mailbox-conflict.json -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: message/rfc822' \
+            --data-binary @/tmp/mailbox-message-conflict.eml \
+            http://127.0.0.1:5080/api/mailbox/messages/rfc822)
+          test "$conflict_code" = "409"
+          printf '%s' "$(cat /tmp/mailbox-conflict.json)" | jq -e '
+            .outcome == "Conflict"
+            and (.error | contains("different MIME payload"))
+          ' >/dev/null
+
+          other_mailbox_code=$(curl -sS -o /tmp/mailbox-other.json -w '%{http_code}' \
+            -H "X-DocFlow-Api-Key: $other_api_key" \
+            -H 'Content-Type: message/rfc822' \
+            --data-binary @/tmp/mailbox-message.eml \
+            http://127.0.0.1:5080/api/mailbox/messages/rfc822)
+          test "$other_mailbox_code" = "201"
+          other_mailbox_id=$(jq -r '.mailboxMessageId' /tmp/mailbox-other.json)
+          test "$other_mailbox_id" != "$mailbox_id"
+
+          identity_count=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+            "SELECT COUNT(*) FROM \"MailboxMessages\" WHERE \"MessageIdentity\"='message-id:docflow-mailbox-e2e@example.test';")
+          test "$identity_count" = "2"
 
           echo "Scenario 1: valid quotation is processed automatically"
           upload_json=$(curl -fsS \
