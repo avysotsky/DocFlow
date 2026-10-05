@@ -15,6 +15,7 @@ on:
       - '.github/scripts/generate_supplier_invoice_pdf.py'
       - '.github/scripts/generate_purchase_order_pdf.py'
       - '.github/scripts/generate_mailbox_message.py'
+      - '.github/scripts/send_rfc822_smtp.py'
       - '.github/scripts/verify_batch_idempotency.py'
       - '.github/scripts/verify_document_export.py'
       - '.github/scripts/verify_document_inbox.py'
@@ -45,6 +46,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      greenmail:
+        image: greenmail/standalone:2.1.14
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.smtp
+            -Dgreenmail.setup.test.imap
+            -Dgreenmail.hostname=0.0.0.0
+            -Dgreenmail.users=ap:pwd@example.com
+        ports:
+          - 3025:3025
+          - 3143:3143
 
     steps:
       - name: Checkout
@@ -96,6 +109,25 @@ jobs:
             --pdf /tmp/mailbox-invoice.pdf \
             --output /tmp/mailbox-message-conflict.eml \
             --subject "Changed payload with same Message-Id"
+
+          python .github/scripts/generate_supplier_invoice_pdf.py \
+            /tmp/imap-invoice-1.pdf \
+            --invoice-number INV-IMAP-001
+          python .github/scripts/generate_mailbox_message.py \
+            --pdf /tmp/imap-invoice-1.pdf \
+            --output /tmp/imap-message-1.eml \
+            --message-id docflow-imap-e2e-1@example.test \
+            --subject "IMAP invoice one" \
+            --attachment-name imap-invoice-1.pdf
+          python .github/scripts/generate_supplier_invoice_pdf.py \
+            /tmp/imap-invoice-2.pdf \
+            --invoice-number INV-IMAP-002
+          python .github/scripts/generate_mailbox_message.py \
+            --pdf /tmp/imap-invoice-2.pdf \
+            --output /tmp/imap-message-2.eml \
+            --message-id docflow-imap-e2e-2@example.test \
+            --subject "IMAP invoice two" \
+            --attachment-name imap-invoice-2.pdf
           python .github/scripts/generate_purchase_order_pdf.py /tmp/purchase-order.pdf
           python .github/scripts/generate_purchase_order_pdf.py /tmp/purchase-order-mismatch.pdf --mismatch-first-price
           python .github/scripts/generate_supplier_invoice_pdf.py /tmp/retention-primary-invoice.pdf --invoice-number INV-800001
@@ -116,6 +148,17 @@ jobs:
           Authentication__ApiKey__Clients__1__ApiKey: docflow-e2e-other-key
           Intake__Idempotency__CleanupIntervalSeconds: 1
           Intake__Idempotency__CleanupBatchSize: 1
+          Mailbox__Imap__Enabled: "true"
+          Mailbox__Imap__PollIntervalSeconds: 1
+          Mailbox__Imap__BatchSize: 10
+          Mailbox__Imap__Accounts__0__Name: e2e-local-imap
+          Mailbox__Imap__Accounts__0__CustomerId: 11111111-1111-1111-1111-111111111111
+          Mailbox__Imap__Accounts__0__Host: 127.0.0.1
+          Mailbox__Imap__Accounts__0__Port: 3143
+          Mailbox__Imap__Accounts__0__UseSsl: "false"
+          Mailbox__Imap__Accounts__0__Username: ap
+          Mailbox__Imap__Accounts__0__Password: pwd
+          Mailbox__Imap__Accounts__0__Folder: INBOX
           Notifications__Webhooks__PollIntervalSeconds: 1
           Notifications__Webhooks__RequestTimeoutSeconds: 3
           Notifications__Webhooks__MaxAttempts: 3
@@ -145,6 +188,28 @@ jobs:
             sleep 1
           done
           test "$webhook_ready" = "true"
+
+          greenmail_ready=false
+          for _ in $(seq 1 30); do
+            if python - <<'PY'
+import socket
+for port in (3025, 3143):
+    connection = socket.create_connection(("127.0.0.1", port), timeout=1)
+    connection.close()
+PY
+            then
+              greenmail_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$greenmail_ready" = "true"
+
+          python .github/scripts/send_rfc822_smtp.py \
+            --port 3025 \
+            --sender billing@example.com \
+            --recipient ap@example.com \
+            --message /tmp/imap-message-1.eml
 
           dotnet run \
             --project src/DocFlow.Api/DocFlow.Api.csproj \
@@ -259,6 +324,108 @@ jobs:
             done
             return 1
           }
+
+          echo "Scenario 0c: local IMAP polling persists UID checkpoint and survives API restart"
+          imap_document_id=""
+          for _ in $(seq 1 30); do
+            imap_document_id=$(docker run --rm --network host \
+              -e PGPASSWORD=postgres postgres:16 \
+              psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+              "SELECT COALESCE(a.\"DocumentId\"::text,'') FROM \"MailboxMessages\" m JOIN \"MailboxAttachments\" a ON a.\"MailboxMessageId\"=m.\"Id\" WHERE m.\"CustomerId\"='$customer_id' AND m.\"MessageIdentity\"='message-id:docflow-imap-e2e-1@example.test' LIMIT 1;")
+            if [ -n "$imap_document_id" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$imap_document_id"
+
+          imap_status=$(wait_for_terminal_status "$imap_document_id")
+          test "$imap_status" = "Processed"
+          imap_result_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            "http://127.0.0.1:5080/api/documents/$imap_document_id/extraction-result")
+          printf '%s' "$imap_result_json" | jq -e '
+            .validationStatus == "Valid"
+            and .structuredData.document_type == "supplier_invoice"
+            and .structuredData.data.invoice_number == "INV-IMAP-001"
+          ' >/dev/null
+
+          first_checkpoint=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT \"UidValidity\",\"LastUid\" FROM \"ImapMailboxCheckpoints\" WHERE \"CustomerId\"='$customer_id' AND \"MailboxKey\"='e2e-local-imap' AND \"FolderName\"='INBOX';")
+          test -n "$first_checkpoint"
+          first_uid_validity=$(printf '%s' "$first_checkpoint" | cut -d'|' -f1)
+          first_last_uid=$(printf '%s' "$first_checkpoint" | cut -d'|' -f2)
+          test "$first_uid_validity" -gt 0
+          test "$first_last_uid" -gt 0
+
+          kill "$api_pid"
+          wait "$api_pid" 2>/dev/null || true
+
+          python .github/scripts/send_rfc822_smtp.py \
+            --port 3025 \
+            --sender billing@example.com \
+            --recipient ap@example.com \
+            --message /tmp/imap-message-2.eml
+
+          dotnet run \
+            --project src/DocFlow.Api/DocFlow.Api.csproj \
+            --configuration Release \
+            --no-build \
+            --no-launch-profile \
+            >> /tmp/docflow-api.log 2>&1 &
+          api_pid=$!
+
+          ready=false
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5080/swagger/v1/swagger.json >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "true"
+
+          imap_document_id_2=""
+          for _ in $(seq 1 30); do
+            imap_document_id_2=$(docker run --rm --network host \
+              -e PGPASSWORD=postgres postgres:16 \
+              psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+              "SELECT COALESCE(a.\"DocumentId\"::text,'') FROM \"MailboxMessages\" m JOIN \"MailboxAttachments\" a ON a.\"MailboxMessageId\"=m.\"Id\" WHERE m.\"CustomerId\"='$customer_id' AND m.\"MessageIdentity\"='message-id:docflow-imap-e2e-2@example.test' LIMIT 1;")
+            if [ -n "$imap_document_id_2" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$imap_document_id_2"
+          test "$imap_document_id_2" != "$imap_document_id"
+
+          imap_status_2=$(wait_for_terminal_status "$imap_document_id_2")
+          test "$imap_status_2" = "Processed"
+          imap_result_json_2=$(curl -fsS \
+            "${auth_header[@]}" \
+            "http://127.0.0.1:5080/api/documents/$imap_document_id_2/extraction-result")
+          printf '%s' "$imap_result_json_2" | jq -e '
+            .validationStatus == "Valid"
+            and .structuredData.document_type == "supplier_invoice"
+            and .structuredData.data.invoice_number == "INV-IMAP-002"
+          ' >/dev/null
+
+          second_checkpoint=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT \"UidValidity\",\"LastUid\" FROM \"ImapMailboxCheckpoints\" WHERE \"CustomerId\"='$customer_id' AND \"MailboxKey\"='e2e-local-imap' AND \"FolderName\"='INBOX';")
+          second_uid_validity=$(printf '%s' "$second_checkpoint" | cut -d'|' -f1)
+          second_last_uid=$(printf '%s' "$second_checkpoint" | cut -d'|' -f2)
+          test "$second_uid_validity" = "$first_uid_validity"
+          test "$second_last_uid" -gt "$first_last_uid"
+
+          imap_first_document_count=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+            "SELECT COUNT(*) FROM \"Documents\" WHERE \"CustomerId\"='$customer_id' AND \"OriginalFileName\"='imap-invoice-1.pdf';")
+          test "$imap_first_document_count" = "1"
 
           echo "Scenario 0b: RFC822 mailbox PDF enters normal document processing idempotently"
           mailbox_code=$(curl -sS -o /tmp/mailbox-first.json -w '%{http_code}' \
