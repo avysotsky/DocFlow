@@ -390,6 +390,7 @@ def main() -> None:
     parser.add_argument("--customer-id", required=True)
     parser.add_argument("--other-customer-id", required=True)
     parser.add_argument("--other-document-id", required=True)
+    parser.add_argument("--other-mailbox-document-id", required=True)
     parser.add_argument("--invoice-document-id", required=True)
     parser.add_argument("--failed-document-id", required=True)
     parser.add_argument("--needs-review-document-id", required=True)
@@ -420,6 +421,7 @@ def main() -> None:
 
     ids = {item["id"] for item in items}
     assert args.other_document_id not in ids, "Tenant isolation failed"
+    assert args.other_mailbox_document_id not in ids, "Mailbox tenant isolation failed"
     assert args.invoice_document_id in ids
     assert args.failed_document_id in ids
     assert args.needs_review_document_id in ids
@@ -590,9 +592,16 @@ def main() -> None:
         {"page": 1, "pageSize": 50},
     )
     assert status == 200 and isinstance(other, dict), (status, other)
-    assert other["totalCount"] == 1, other
-    assert [item["id"] for item in other["items"]] == [args.other_document_id], other
-    assert other["items"][0]["customerId"] == args.other_customer_id, other
+    assert other["totalCount"] == 2, other
+    other_ids = {item["id"] for item in other["items"]}
+    assert other_ids == {
+        args.other_document_id,
+        args.other_mailbox_document_id,
+    }, other
+    assert all(
+        item["customerId"] == args.other_customer_id
+        for item in other["items"]
+    ), other
 
     invalid_queries = [
         {"page": 0},
