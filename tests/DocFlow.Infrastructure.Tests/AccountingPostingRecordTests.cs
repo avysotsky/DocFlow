@@ -79,6 +79,9 @@ public sealed class AccountingPostingRecordTests
         Assert.Equal(3, record.Attempts);
         Assert.Null(record.NextAttemptAt);
         Assert.Equal("permanent provider rejection", record.LastError);
+
+        Assert.Throws<InvalidOperationException>(
+            () => record.MarkAttemptStarted(now.AddHours(1)));
     }
 
     [Fact]
