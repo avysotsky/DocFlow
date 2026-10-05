@@ -41,7 +41,8 @@ public sealed record MailboxAttachmentIngestionItem(
     string FileName,
     string ContentType,
     long Size,
-    string Sha256);
+    string Sha256,
+    Guid? DocumentId);
 
 public sealed record MailboxMessageIngestionResult(
     MailboxMessageIngestionOutcome Outcome,
