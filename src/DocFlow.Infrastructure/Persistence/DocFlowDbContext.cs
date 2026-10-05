@@ -16,6 +16,7 @@ public sealed class DocFlowDbContext : DbContext
     public DbSet<IntakeIdempotencyRecord> IntakeIdempotencyRecords => Set<IntakeIdempotencyRecord>();
     public DbSet<BatchIntakeIdempotencyRecord> BatchIntakeIdempotencyRecords => Set<BatchIntakeIdempotencyRecord>();
     public DbSet<DocumentCompletionEvent> DocumentCompletionEvents => Set<DocumentCompletionEvent>();
+    public DbSet<ReconciliationCase> ReconciliationCases => Set<ReconciliationCase>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
