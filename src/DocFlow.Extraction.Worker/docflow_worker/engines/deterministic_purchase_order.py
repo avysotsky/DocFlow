@@ -639,6 +639,11 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
 
         direct_patterns = (
             re.compile(
+                r"\bpurchase[ \t]+order[ \t]+"
+                r"(?P<value>[A-Z]{2,}[A-Z0-9/-]*\d[A-Z0-9/-]*)(?:\.\d+)?\b",
+                re.IGNORECASE,
+            ),
+            re.compile(
                 r"\bpurchase[ \t]+order[ \t]+(?:number|no\.?|#)"
                 r"[ \t]*[:#]?[ \t]*(?P<value>[A-Z0-9][A-Z0-9._/-]{3,})\b",
                 re.IGNORECASE,
