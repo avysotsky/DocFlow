@@ -315,6 +315,9 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("DocumentId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -335,6 +338,8 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
 
                     b.HasIndex("MailboxMessageId", "Ordinal")
                         .IsUnique();
@@ -500,6 +505,11 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("DocFlow.Domain.Entities.MailboxAttachmentRecord", b =>
                 {
+                    b.HasOne("DocFlow.Domain.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("DocFlow.Domain.Entities.MailboxMessageRecord", null)
                         .WithMany()
                         .HasForeignKey("MailboxMessageId")
