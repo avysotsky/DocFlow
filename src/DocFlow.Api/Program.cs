@@ -247,6 +247,7 @@ builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();
 builder.Services.AddScoped<IInvoicePurchaseOrderReconciliationService, InvoicePurchaseOrderReconciliationService>();
 builder.Services.AddScoped<IReconciliationCaseService, ReconciliationCaseService>();
 builder.Services.AddScoped<IReconciliationCaseExportService, ReconciliationCaseExportService>();
+builder.Services.AddScoped<IAccountingBillPayloadFactory, AccountingBillPayloadFactory>();
 builder.Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
 if (builder.Environment.IsDevelopment())
 {
