@@ -233,6 +233,12 @@ builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();
 builder.Services.AddScoped<IInvoicePurchaseOrderReconciliationService, InvoicePurchaseOrderReconciliationService>();
 builder.Services.AddScoped<IReconciliationCaseService, ReconciliationCaseService>();
 builder.Services.AddScoped<IReconciliationCaseExportService, ReconciliationCaseExportService>();
+builder.Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<IAccountingPostingAdapter, LocalDeterministicAccountingPostingAdapter>();
+}
+
 builder.Services.AddScoped<IMailboxMessageParser, MimeMailboxMessageParser>();
 builder.Services.AddScoped<IMailboxMessageIngestionService, MailboxMessageIngestionService>();
 builder.Services.AddScoped<ImapMailboxPoller>();
