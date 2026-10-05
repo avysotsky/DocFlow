@@ -336,10 +336,7 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                     break
 
                 match = re.match(
-                    r"^(?P<reference>[A-Z0-9][A-Z0-9._/-]{4,})\s{2,}"
-                    r"(?P<body>.+?)"
-                    r"(?:\s{2,}(?P<unit>[A-Za-z][A-Za-z0-9 /.-]{0,24}))?"
-                    r"(?:\s{2,}(?P<quantity>\d+(?:[.,]\d+)?))?\s*$",
+                    r"^(?P<reference>[A-Z0-9][A-Z0-9._/-]{4,})\s{2,}(?P<rest>.+)$",
                     line,
                     flags=re.IGNORECASE,
                 )
@@ -348,9 +345,28 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
                     continue
 
                 reference = match.group("reference")
-                body = match.group("body").strip()
-                unit = match.group("unit")
-                quantity = cls._parse_decimal(match.group("quantity"))
+                cells = [
+                    cell.strip()
+                    for cell in re.split(r"[ \t]{2,}", match.group("rest"))
+                    if cell.strip()
+                ]
+                if not cells:
+                    index += 1
+                    continue
+
+                quantity: Decimal | None = None
+                unit: str | None = None
+                if cls._parse_decimal(cells[-1]) is not None:
+                    quantity = cls._parse_decimal(cells[-1])
+                    cells = cells[:-1]
+                if cells and cls._looks_like_unit(cells[-1]):
+                    unit = cells[-1]
+                    cells = cells[:-1]
+
+                body = " ".join(cells).strip()
+                if not body:
+                    index += 1
+                    continue
 
                 description_parts = [body]
                 need_by_date: date | None = None
