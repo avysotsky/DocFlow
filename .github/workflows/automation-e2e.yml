@@ -829,18 +829,23 @@ jobs:
           posting_db_state=$(docker run --rm --network host \
             -e PGPASSWORD=postgres postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
-            "SELECT COUNT(*),MIN(\"Status\"),MIN(\"Attempts\"),MIN(COALESCE(\"ExternalReference\",'')),MIN((\"PayloadJson\"::jsonb #>> '{data,invoice_number}')) FROM \"AccountingPostingRecords\" WHERE \"CustomerId\"='$customer_id' AND \"Provider\"='local-test' AND \"TargetAccount\"='e2e-ledger' AND \"IdempotencyKey\"='invoice-posting-001';")
+            "SELECT COUNT(*),MIN(\"Status\"),MIN(\"Attempts\"),MIN(COALESCE(\"ExternalReference\",'')),MIN(\"PayloadJson\"::jsonb #>> '{schemaVersion}'),MIN(\"PayloadJson\"::jsonb #>> '{invoiceNumber}'),MIN(\"PayloadJson\"::jsonb #>> '{supplierName}'),MIN(\"PayloadJson\"::jsonb #>> '{currency}'),MIN(\"PayloadJson\"::jsonb #>> '{total}'),MIN(jsonb_array_length(\"PayloadJson\"::jsonb -> 'lines')) FROM \"AccountingPostingRecords\" WHERE \"CustomerId\"='$customer_id' AND \"Provider\"='local-test' AND \"TargetAccount\"='e2e-ledger' AND \"IdempotencyKey\"='invoice-posting-001';")
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f1)" = "1"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f2)" = "Posted"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f3)" = "1"
-          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f5)" = "INV-2026-091"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f5)" = "accounting_bill_v1"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f6)" = "INV-2026-091"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f7)" = "ACME Components Ltd."
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f8)" = "EUR"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f9)" = "1748.40"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f10)" = "5"
 
           echo "Scenario 6a.1: durable pending accounting posting is completed by background worker"
           worker_posting_id='55555555-5555-4555-8555-555555555551'
           docker run --rm --network host \
             -e PGPASSWORD=postgres postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
-            "INSERT INTO \"AccountingPostingRecords\" (\"Id\",\"CustomerId\",\"DocumentId\",\"Provider\",\"TargetAccount\",\"IdempotencyKey\",\"PayloadJson\",\"Status\",\"Attempts\",\"CreatedAt\",\"UpdatedAt\",\"NextAttemptAt\") VALUES ('$worker_posting_id','$customer_id','$invoice_document_id','local-test','worker-ledger','worker-posting-001','{\"document_type\":\"supplier_invoice\",\"data\":{\"invoice_number\":\"INV-WORKER-001\"}}'::jsonb,'Pending',0,NOW(),NOW(),NOW());"
+            "INSERT INTO \"AccountingPostingRecords\" (\"Id\",\"CustomerId\",\"DocumentId\",\"Provider\",\"TargetAccount\",\"IdempotencyKey\",\"PayloadJson\",\"Status\",\"Attempts\",\"CreatedAt\",\"UpdatedAt\",\"NextAttemptAt\") VALUES ('$worker_posting_id','$customer_id','$invoice_document_id','local-test','worker-ledger','worker-posting-001','{\"schemaVersion\":\"accounting_bill_v1\",\"supplierName\":\"Worker Supplier\",\"invoiceNumber\":\"INV-WORKER-001\",\"invoiceDate\":\"2026-09-30\",\"dueDate\":null,\"currency\":\"EUR\",\"customerReference\":null,\"purchaseOrderNumber\":null,\"lines\":[],\"discountAmount\":null,\"taxInclusive\":false,\"subtotal\":100.00,\"taxAmount\":20.00,\"total\":120.00,\"taxes\":[],\"paymentTerms\":null,\"notes\":null}'::jsonb,'Pending',0,NOW(),NOW(),NOW());"
 
           worker_posting_state=""
           for _ in $(seq 1 20); do
@@ -873,7 +878,7 @@ jobs:
           docker run --rm --network host \
             -e PGPASSWORD=postgres postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
-            "INSERT INTO \"AccountingPostingRecords\" (\"Id\",\"CustomerId\",\"DocumentId\",\"Provider\",\"TargetAccount\",\"IdempotencyKey\",\"PayloadJson\",\"Status\",\"Attempts\",\"CreatedAt\",\"UpdatedAt\",\"LastAttemptAt\",\"NextAttemptAt\") VALUES ('$stale_posting_id','$customer_id','$invoice_document_id','local-test','recovery-ledger','stale-posting-001','{\"document_type\":\"supplier_invoice\",\"data\":{\"invoice_number\":\"INV-RECOVERY-001\"}}'::jsonb,'Posting',1,NOW()-INTERVAL '10 seconds',NOW()-INTERVAL '10 seconds',NOW()-INTERVAL '10 seconds',NULL);"
+            "INSERT INTO \"AccountingPostingRecords\" (\"Id\",\"CustomerId\",\"DocumentId\",\"Provider\",\"TargetAccount\",\"IdempotencyKey\",\"PayloadJson\",\"Status\",\"Attempts\",\"CreatedAt\",\"UpdatedAt\",\"LastAttemptAt\",\"NextAttemptAt\") VALUES ('$stale_posting_id','$customer_id','$invoice_document_id','local-test','recovery-ledger','stale-posting-001','{\"schemaVersion\":\"accounting_bill_v1\",\"supplierName\":\"Recovery Supplier\",\"invoiceNumber\":\"INV-RECOVERY-001\",\"invoiceDate\":\"2026-09-30\",\"dueDate\":null,\"currency\":\"EUR\",\"customerReference\":null,\"purchaseOrderNumber\":null,\"lines\":[],\"discountAmount\":null,\"taxInclusive\":false,\"subtotal\":200.00,\"taxAmount\":40.00,\"total\":240.00,\"taxes\":[],\"paymentTerms\":null,\"notes\":null}'::jsonb,'Posting',1,NOW()-INTERVAL '10 seconds',NOW()-INTERVAL '10 seconds',NOW()-INTERVAL '10 seconds',NULL);"
 
           stale_posting_state=""
           for _ in $(seq 1 20); do
