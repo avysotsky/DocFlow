@@ -191,13 +191,7 @@ jobs:
 
           greenmail_ready=false
           for _ in $(seq 1 30); do
-            if python - <<'PY'
-            import socket
-            for port in (3025, 3143):
-                connection = socket.create_connection(("127.0.0.1", port), timeout=1)
-                connection.close()
-            PY
-            then
+            if python -c 'import socket; [socket.create_connection(("127.0.0.1", port), timeout=1).close() for port in (3025, 3143)]'; then
               greenmail_ready=true
               break
             fi
