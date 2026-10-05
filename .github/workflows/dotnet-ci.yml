@@ -19,6 +19,10 @@ on:
       - '.github/workflows/dotnet-ci.yml'
   workflow_dispatch:
 
+concurrency:
+  group: dotnet-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
