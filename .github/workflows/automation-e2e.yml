@@ -856,6 +856,7 @@ jobs:
             --customer-id "$customer_id" \
             --other-customer-id "$other_customer_id" \
             --other-document-id "$other_document_id" \
+            --other-mailbox-document-id "$other_mailbox_document_id" \
             --invoice-document-id "$invoice_document_id" \
             --failed-document-id "$failed_document_id" \
             --needs-review-document-id "$invalid_document_id"
