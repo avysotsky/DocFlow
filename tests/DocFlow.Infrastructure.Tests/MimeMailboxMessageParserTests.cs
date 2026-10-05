@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using DocFlow.Infrastructure.Mailbox;
+using Xunit;
 
 namespace DocFlow.Infrastructure.Tests;
 
