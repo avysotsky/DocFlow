@@ -125,6 +125,7 @@ public sealed class AccountingPostingService : IAccountingPostingService
             customerId,
             documentId,
             normalizedProvider,
+            target.Key,
             normalizedTarget,
             normalizedKey,
             payloadJson);
@@ -242,7 +243,7 @@ public sealed class AccountingPostingService : IAccountingPostingService
             entity.CustomerId,
             entity.DocumentId,
             entity.Provider,
-            entity.TargetAccount,
+            entity.TargetKey,
             entity.IdempotencyKey,
             entity.Status,
             entity.Attempts,
