@@ -107,6 +107,7 @@ public sealed class AccountingPostingService : IAccountingPostingService
             payloadJson);
 
         _dbContext.AccountingPostingRecords.Add(entity);
+        entity.MarkAttemptStarted(DateTimeOffset.UtcNow);
 
         try
         {
@@ -133,9 +134,6 @@ public sealed class AccountingPostingService : IAccountingPostingService
 
             return ReplayOrConflict(existing, documentId, payloadJson);
         }
-
-        entity.MarkAttemptStarted(DateTimeOffset.UtcNow);
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         AccountingPostingAdapterResult adapterResult;
         try
