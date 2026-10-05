@@ -1,5 +1,5 @@
 name: Automation E2E
-# Final validation: 1.1.1.14 RestartRecovery
+# Final validation: 1.1.1.33 MailboxIntake
 
 on:
   push:
