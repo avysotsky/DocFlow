@@ -33,7 +33,14 @@ public sealed class MailboxAttachmentRecordConfiguration
             .HasForeignKey(x => x.MailboxMessageId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasOne<Document>()
+            .WithMany()
+            .HasForeignKey(x => x.DocumentId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasIndex(x => new { x.MailboxMessageId, x.Ordinal })
             .IsUnique();
+
+        builder.HasIndex(x => x.DocumentId);
     }
 }
