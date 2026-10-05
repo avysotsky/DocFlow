@@ -662,6 +662,13 @@ jobs:
             and .auditHistory[1].note == "Invoice price does not match approved purchase order."
           ' >/dev/null
 
+          echo "Scenario 6d: resolved reconciliation case exports business CSV and XLSX"
+          python .github/scripts/verify_reconciliation_case_export.py \
+            --base-url http://127.0.0.1:5080 \
+            --api-key "$api_key" \
+            --other-api-key "$other_api_key" \
+            --case-id "$mismatch_case_id"
+
           echo "Scenario 7: persisted extraction result exports to CSV and XLSX"
           python .github/scripts/verify_document_export.py \
             --base-url http://127.0.0.1:5080 \
