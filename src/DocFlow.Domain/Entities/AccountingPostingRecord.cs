@@ -43,7 +43,11 @@ public sealed class AccountingPostingRecord
         if (documentId == Guid.Empty)
             throw new ArgumentException("Document id is required.", nameof(documentId));
 
-        Provider = NormalizeRequired(provider, MaxProviderLength, nameof(provider));
+        Provider = NormalizeRequired(
+            provider,
+            MaxProviderLength,
+            nameof(provider))
+            .ToLowerInvariant();
         TargetAccount = NormalizeRequired(
             targetAccount,
             MaxTargetAccountLength,
