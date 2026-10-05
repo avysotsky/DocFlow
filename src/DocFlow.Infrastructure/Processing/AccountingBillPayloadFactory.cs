@@ -74,6 +74,7 @@ public sealed class AccountingBillPayloadFactory
                 ReadDecimal(data, "discount_amount"),
                 ReadBoolean(data, "tax_inclusive") ?? false,
                 ReadDecimal(data, "subtotal"),
+                ReadDecimal(data, "vat_rate"),
                 ReadDecimal(data, "vat_amount"),
                 total.Value,
                 taxes,
