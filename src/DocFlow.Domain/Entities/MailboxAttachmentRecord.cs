@@ -13,6 +13,7 @@ public sealed class MailboxAttachmentRecord
     public string ContentType { get; private set; } = string.Empty;
     public long Size { get; private set; }
     public string Sha256 { get; private set; } = string.Empty;
+    public Guid? DocumentId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private MailboxAttachmentRecord()
@@ -59,5 +60,19 @@ public sealed class MailboxAttachmentRecord
         Size = size;
         Sha256 = normalizedSha256;
         CreatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void AttachDocument(Guid documentId)
+    {
+        if (documentId == Guid.Empty)
+            throw new ArgumentException("Document id is required.", nameof(documentId));
+
+        if (DocumentId.HasValue && DocumentId.Value != documentId)
+        {
+            throw new InvalidOperationException(
+                $"Mailbox attachment is already linked to document '{DocumentId.Value}'.");
+        }
+
+        DocumentId = documentId;
     }
 }
