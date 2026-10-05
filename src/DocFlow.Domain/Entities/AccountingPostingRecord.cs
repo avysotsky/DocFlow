@@ -5,6 +5,7 @@ namespace DocFlow.Domain.Entities;
 public sealed class AccountingPostingRecord
 {
     public const int MaxProviderLength = 64;
+    public const int MaxTargetKeyLength = 100;
     public const int MaxTargetAccountLength = 200;
     public const int MaxIdempotencyKeyLength = 128;
     public const int MaxExternalReferenceLength = 200;
@@ -14,6 +15,7 @@ public sealed class AccountingPostingRecord
     public Guid CustomerId { get; private set; }
     public Guid DocumentId { get; private set; }
     public string Provider { get; private set; } = string.Empty;
+    public string TargetKey { get; private set; } = string.Empty;
     public string TargetAccount { get; private set; } = string.Empty;
     public string IdempotencyKey { get; private set; } = string.Empty;
     public string PayloadJson { get; private set; } = string.Empty;
@@ -34,6 +36,7 @@ public sealed class AccountingPostingRecord
         Guid customerId,
         Guid documentId,
         string provider,
+        string targetKey,
         string targetAccount,
         string idempotencyKey,
         string payloadJson)
@@ -48,6 +51,10 @@ public sealed class AccountingPostingRecord
             MaxProviderLength,
             nameof(provider))
             .ToLowerInvariant();
+        TargetKey = NormalizeRequired(
+            targetKey,
+            MaxTargetKeyLength,
+            nameof(targetKey));
         TargetAccount = NormalizeRequired(
             targetAccount,
             MaxTargetAccountLength,
