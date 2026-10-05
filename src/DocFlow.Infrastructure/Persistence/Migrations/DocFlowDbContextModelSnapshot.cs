@@ -254,6 +254,48 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("ExtractionResults", (string)null);
                 });
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.ReconciliationCaseAuditEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("NewStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PerformedByClient")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("ReconciliationCaseId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReconciliationCaseId", "OccurredAt");
+
+                    b.ToTable("ReconciliationCaseAuditEvents", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.ReconciliationCase", b =>
                 {
                     b.Property<Guid>("Id")
@@ -364,6 +406,15 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.HasOne("DocFlow.Domain.Entities.Document", null)
                         .WithOne()
                         .HasForeignKey("DocFlow.Domain.Entities.DocumentReview", "DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DocFlow.Domain.Entities.ReconciliationCaseAuditEvent", b =>
+                {
+                    b.HasOne("DocFlow.Domain.Entities.ReconciliationCase", null)
+                        .WithMany()
+                        .HasForeignKey("ReconciliationCaseId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
