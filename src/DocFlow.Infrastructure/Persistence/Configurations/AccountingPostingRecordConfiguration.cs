@@ -17,6 +17,10 @@ public sealed class AccountingPostingRecordConfiguration
             .HasMaxLength(AccountingPostingRecord.MaxProviderLength)
             .IsRequired();
 
+        builder.Property(x => x.TargetKey)
+            .HasMaxLength(AccountingPostingRecord.MaxTargetKeyLength)
+            .IsRequired();
+
         builder.Property(x => x.TargetAccount)
             .HasMaxLength(AccountingPostingRecord.MaxTargetAccountLength)
             .IsRequired();
