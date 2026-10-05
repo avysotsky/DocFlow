@@ -1,3 +1,4 @@
+using DocFlow.Api.Accounting;
 using DocFlow.Api.Authentication;
 using DocFlow.Api.BackgroundServices;
 using DocFlow.Api.Documents;
@@ -138,6 +139,27 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services
+    .AddOptions<AccountingPostingTargetsOptions>()
+    .Bind(builder.Configuration.GetSection(AccountingPostingTargetsOptions.ConfigurationSection))
+    .Validate(
+        options => options.Targets.All(target =>
+            target.CustomerId != Guid.Empty
+            && !string.IsNullOrWhiteSpace(target.Key)
+            && target.Key.Trim().Length <= 100
+            && !string.IsNullOrWhiteSpace(target.Provider)
+            && target.Provider.Trim().Length <= 64
+            && !string.IsNullOrWhiteSpace(target.TargetAccount)
+            && target.TargetAccount.Trim().Length <= 200),
+        "Every accounting target must have valid tenant, key, provider and target account.")
+    .Validate(
+        options => options.Targets
+            .Select(target => $"{target.CustomerId:N}:{target.Key.Trim().ToLowerInvariant()}")
+            .Distinct(StringComparer.Ordinal)
+            .Count() == options.Targets.Count,
+        "Accounting target keys must be unique within each tenant.")
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<AccountingPostingWorkerOptions>()
     .Bind(builder.Configuration.GetSection(AccountingPostingWorkerOptions.ConfigurationSection))
     .Validate(
@@ -248,6 +270,7 @@ builder.Services.AddScoped<IInvoicePurchaseOrderReconciliationService, InvoicePu
 builder.Services.AddScoped<IReconciliationCaseService, ReconciliationCaseService>();
 builder.Services.AddScoped<IReconciliationCaseExportService, ReconciliationCaseExportService>();
 builder.Services.AddScoped<IAccountingBillPayloadFactory, AccountingBillPayloadFactory>();
+builder.Services.AddSingleton<IAccountingPostingTargetResolver, ConfiguredAccountingPostingTargetResolver>();
 builder.Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
 if (builder.Environment.IsDevelopment())
 {
