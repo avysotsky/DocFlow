@@ -11,10 +11,14 @@ namespace DocFlow.Api.Controllers;
 public sealed class AccountingPostingsController : ControllerBase
 {
     private readonly IAccountingPostingService _service;
+    private readonly IAccountingPostingTargetResolver _targetResolver;
 
-    public AccountingPostingsController(IAccountingPostingService service)
+    public AccountingPostingsController(
+        IAccountingPostingService service,
+        IAccountingPostingTargetResolver targetResolver)
     {
         _service = service;
+        _targetResolver = targetResolver;
     }
 
     [HttpPost]
@@ -98,6 +102,23 @@ public sealed class AccountingPostingsController : ControllerBase
         }
     }
 
+    [HttpGet("targets")]
+    [ProducesResponseType(
+        typeof(IReadOnlyList<AccountingPostingTargetSummary>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public ActionResult<IReadOnlyList<AccountingPostingTargetSummary>> GetTargets()
+    {
+        var targets = _targetResolver
+            .GetAvailable(User.GetRequiredCustomerId())
+            .Select(target => new AccountingPostingTargetSummary(
+                target.Key,
+                target.Provider))
+            .ToArray();
+
+        return Ok(targets);
+    }
+
     [HttpGet("{postingId:guid}")]
     [ProducesResponseType(typeof(AccountingPostingSnapshot), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -116,6 +137,10 @@ public sealed class AccountingPostingsController : ControllerBase
 
         return posting is null ? NotFound() : Ok(posting);
     }
+
+    public sealed record AccountingPostingTargetSummary(
+        string Key,
+        string Provider);
 
     public sealed record CreateAccountingPostingRequest(
         Guid DocumentId,
