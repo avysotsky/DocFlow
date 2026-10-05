@@ -284,3 +284,47 @@ Grand Total                           48,059.70
     assert po.items[0].unit_price == Decimal("40049.75")
     assert po.items[0].line_total == Decimal("40049.75")
 
+
+
+def test_recovers_referenced_sparse_ukhsa_row_without_creating_delivery_pseudo_item() -> None:
+    content = _content(
+        """
+Purchase Order                             Purchase Order Number
+                          P5058264
+                                                                               Date               : 09-MAR-23
+ Supplier Name and Address:            Delivery Address:
+ IDEXX LABORATORIES LIMITED
+
+Your                                                                                         Unit Of                 Unit Price             Total Price              Description                                                                            QuantityReference                                                                      Measure                (excl. VAT)              (excl. VAT)
+ 98-0002570-00    Quanti-Tray Sealer PLUS w/ 1 of each PLUS rubber insert (51 and 97 well) (12 month manufacturer             Each          1
+                    warranty included) Ref: 98-0002570-00
+                Need by Date 15-Mar-2023
+                    Quotation reference UKHSA-CM-060223-1
+
+                      delivery Quote Ref:UKHSA-CM-060223-1
+                Need by Date 15-Mar-2023
+                    Quotation reference UKHSA-CM-060223-1
+
+                                                                                                                                    Order Total  GBP              4,015.03
+"""
+    )
+
+    result = asyncio.run(extract_structured_document(content, document_type="auto"))
+    po = PurchaseOrderData.model_validate(result.data)
+
+    assert result.document_type == "purchase_order"
+    assert result.validation_status == "incomplete"
+    assert po.purchase_order_number == "P5058264"
+    assert po.supplier_name == "IDEXX LABORATORIES LIMITED"
+    assert po.order_date == date(2023, 3, 9)
+    assert po.currency == "GBP"
+    assert po.total == Decimal("4015.03")
+    assert len(po.items) == 1
+    assert po.items[0].supplier_reference == "98-0002570-00"
+    assert po.items[0].description == (
+        "Quanti-Tray Sealer PLUS w/ 1 of each PLUS rubber insert (51 and 97 well) "
+        "(12 month manufacturer warranty included) Ref: 98-0002570-00"
+    )
+    assert po.items[0].need_by_date == date(2023, 3, 15)
+    assert po.items[0].unit == "Each"
+    assert po.items[0].quantity == Decimal("1")
