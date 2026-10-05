@@ -87,6 +87,20 @@ public sealed class AccountingPostingRecord
         UpdatedAt = startedAt;
     }
 
+    public void RecoverInterruptedAttempt(DateTimeOffset recoveredAt)
+    {
+        if (Status != AccountingPostingStatus.Posting)
+        {
+            throw new InvalidOperationException(
+                "Only an in-progress accounting posting can be recovered.");
+        }
+
+        Status = AccountingPostingStatus.Pending;
+        NextAttemptAt = recoveredAt;
+        LastError = "Previous accounting posting attempt was interrupted before completion.";
+        UpdatedAt = recoveredAt;
+    }
+
     public void MarkPosted(DateTimeOffset completedAt, string externalReference)
     {
         if (Status != AccountingPostingStatus.Posting)
