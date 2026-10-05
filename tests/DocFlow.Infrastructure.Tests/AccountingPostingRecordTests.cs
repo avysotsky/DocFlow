@@ -99,6 +99,27 @@ public sealed class AccountingPostingRecordTests
     }
 
     [Fact]
+    public void InterruptedPosting_CanBeRecoveredForIdempotentRetry()
+    {
+        var record = CreateRecord();
+        var startedAt = new DateTimeOffset(
+            2026, 10, 5, 18, 30, 0, TimeSpan.Zero);
+        var recoveredAt = startedAt.AddMinutes(3);
+
+        record.MarkAttemptStarted(startedAt);
+        record.RecoverInterruptedAttempt(recoveredAt);
+
+        Assert.Equal(AccountingPostingStatus.Pending, record.Status);
+        Assert.Equal(1, record.Attempts);
+        Assert.Equal(recoveredAt, record.NextAttemptAt);
+        Assert.Contains("interrupted", record.LastError);
+
+        record.MarkAttemptStarted(recoveredAt);
+        Assert.Equal(AccountingPostingStatus.Posting, record.Status);
+        Assert.Equal(2, record.Attempts);
+    }
+
+    [Fact]
     public void PostedRecord_CannotBeRetried()
     {
         var record = CreateRecord();
