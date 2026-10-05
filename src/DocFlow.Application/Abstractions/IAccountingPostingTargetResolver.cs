@@ -8,4 +8,6 @@ public sealed record AccountingPostingTarget(
 public interface IAccountingPostingTargetResolver
 {
     AccountingPostingTarget? Resolve(Guid customerId, string targetKey);
+
+    IReadOnlyList<AccountingPostingTarget> GetAvailable(Guid customerId);
 }
