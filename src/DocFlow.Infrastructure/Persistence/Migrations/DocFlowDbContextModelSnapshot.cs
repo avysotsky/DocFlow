@@ -254,6 +254,94 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("ExtractionResults", (string)null);
                 });
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.MailboxMessageRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InternetMessageId")
+                        .HasMaxLength(998)
+                        .HasColumnType("character varying(998)");
+
+                    b.Property<string>("MessageIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("RawMessageSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Sender")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(998)
+                        .HasColumnType("character varying(998)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId", "CreatedAt");
+
+                    b.HasIndex("CustomerId", "MessageIdentity")
+                        .IsUnique();
+
+                    b.ToTable("MailboxMessages", (string)null);
+                });
+
+            modelBuilder.Entity("DocFlow.Domain.Entities.MailboxAttachmentRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid>("MailboxMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MailboxMessageId", "Ordinal")
+                        .IsUnique();
+
+                    b.ToTable("MailboxAttachments", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.ReconciliationCaseAuditEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -406,6 +494,15 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.HasOne("DocFlow.Domain.Entities.Document", null)
                         .WithOne()
                         .HasForeignKey("DocFlow.Domain.Entities.DocumentReview", "DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DocFlow.Domain.Entities.MailboxAttachmentRecord", b =>
+                {
+                    b.HasOne("DocFlow.Domain.Entities.MailboxMessageRecord", null)
+                        .WithMany()
+                        .HasForeignKey("MailboxMessageId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
