@@ -68,8 +68,9 @@ public sealed class AccountingPostingRecord
 
     public void MarkAttemptStarted(DateTimeOffset startedAt)
     {
-        if (Status == AccountingPostingStatus.Posted)
-            throw new InvalidOperationException("A posted accounting record cannot be retried.");
+        if (Status is AccountingPostingStatus.Posted or AccountingPostingStatus.Failed)
+            throw new InvalidOperationException(
+                "A terminal accounting posting cannot be retried.");
 
         if (Status == AccountingPostingStatus.Posting)
             throw new InvalidOperationException("Accounting posting is already in progress.");
