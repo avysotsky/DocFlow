@@ -60,11 +60,14 @@ public sealed class MimeMailboxMessageParser : IMailboxMessageParser
             var attachments = new List<ParsedMailboxPdfAttachment>();
             var ordinal = 0;
 
-            foreach (var entity in message.Attachments)
+            foreach (var part in message.BodyParts
+                         .OfType<MimePart>()
+                         .Where(part => part.IsAttachment
+                             || !string.IsNullOrWhiteSpace(part.FileName)))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (entity is not MimePart part || part.Content is null)
+                if (part.Content is null)
                     continue;
 
                 var rawFileName = part.FileName
