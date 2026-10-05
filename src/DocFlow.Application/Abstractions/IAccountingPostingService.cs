@@ -12,6 +12,7 @@ public enum AccountingPostingCreateOutcome
     DocumentNotReady,
     ExtractionResultNotFound,
     InvalidPayload,
+    TargetNotFound,
     UnsupportedProvider
 }
 
@@ -40,8 +41,7 @@ public interface IAccountingPostingService
     Task<AccountingPostingCreateResult> CreateAndPostAsync(
         Guid customerId,
         Guid documentId,
-        string provider,
-        string targetAccount,
+        string targetKey,
         string idempotencyKey,
         CancellationToken cancellationToken = default);
 
