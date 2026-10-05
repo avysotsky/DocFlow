@@ -148,6 +148,8 @@ jobs:
           Authentication__ApiKey__Clients__1__ApiKey: docflow-e2e-other-key
           Intake__Idempotency__CleanupIntervalSeconds: 1
           Intake__Idempotency__CleanupBatchSize: 1
+          AccountingPosting__Worker__PollIntervalSeconds: 1
+          AccountingPosting__Worker__BatchSize: 10
           Mailbox__Imap__Enabled: "true"
           Mailbox__Imap__PollIntervalSeconds: 1
           Mailbox__Imap__BatchSize: 10
@@ -831,6 +833,39 @@ jobs:
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f2)" = "Posted"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f3)" = "1"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f5)" = "INV-2026-091"
+
+          echo "Scenario 6a.1: durable pending accounting posting is completed by background worker"
+          worker_posting_id='55555555-5555-4555-8555-555555555551'
+          docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO \"AccountingPostingRecords\" (\"Id\",\"CustomerId\",\"DocumentId\",\"Provider\",\"TargetAccount\",\"IdempotencyKey\",\"PayloadJson\",\"Status\",\"Attempts\",\"CreatedAt\",\"UpdatedAt\",\"NextAttemptAt\") VALUES ('$worker_posting_id','$customer_id','$invoice_document_id','local-test','worker-ledger','worker-posting-001','{\"document_type\":\"supplier_invoice\",\"data\":{\"invoice_number\":\"INV-WORKER-001\"}}'::jsonb,'Pending',0,NOW(),NOW(),NOW());"
+
+          worker_posting_state=""
+          for _ in $(seq 1 20); do
+            worker_posting_state=$(docker run --rm --network host \
+              -e PGPASSWORD=postgres postgres:16 \
+              psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+              "SELECT \"Status\",\"Attempts\",COALESCE(\"ExternalReference\",'') FROM \"AccountingPostingRecords\" WHERE \"Id\"='$worker_posting_id';")
+            if printf '%s' "$worker_posting_state" | grep -q '^Posted|1|local-posting:'; then
+              break
+            fi
+            sleep 1
+          done
+
+          test "$(printf '%s' "$worker_posting_state" | cut -d'|' -f1)" = "Posted"
+          test "$(printf '%s' "$worker_posting_state" | cut -d'|' -f2)" = "1"
+          test "$(printf '%s' "$worker_posting_state" | cut -d'|' -f3)" = "local-posting:55555555555545558555555555555551"
+
+          worker_posting_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            "http://127.0.0.1:5080/api/accounting-postings/$worker_posting_id")
+          printf '%s' "$worker_posting_json" | jq -e '
+            .status == "Posted"
+            and .attempts == 1
+            and .provider == "local-test"
+            and .targetAccount == "worker-ledger"
+          ' >/dev/null
 
           echo "Scenario 6b: purchase order is processed and reconciles with its invoice"
           po_upload_json=$(curl -fsS \
