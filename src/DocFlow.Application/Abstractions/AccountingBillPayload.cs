@@ -52,7 +52,36 @@ public static class AccountingBillPayloadJson
         => JsonSerializer.Serialize(payload, JsonOptions);
 
     public static AccountingBillPayload Deserialize(string json)
-        => JsonSerializer.Deserialize<AccountingBillPayload>(json, JsonOptions)
+    {
+        var payload = JsonSerializer.Deserialize<AccountingBillPayload>(
+            json,
+            JsonOptions)
             ?? throw new InvalidOperationException(
                 "Persisted accounting bill payload is invalid.");
+
+        if (!string.Equals(
+                payload.SchemaVersion,
+                AccountingBillPayload.CurrentSchemaVersion,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Unsupported accounting bill schema version '{payload.SchemaVersion}'.");
+        }
+
+        if (string.IsNullOrWhiteSpace(payload.SupplierName)
+            || string.IsNullOrWhiteSpace(payload.InvoiceNumber)
+            || string.IsNullOrWhiteSpace(payload.Currency))
+        {
+            throw new InvalidOperationException(
+                "Persisted accounting bill payload is missing required identity fields.");
+        }
+
+        if (payload.Lines is null || payload.Taxes is null)
+        {
+            throw new InvalidOperationException(
+                "Persisted accounting bill payload collections are invalid.");
+        }
+
+        return payload;
+    }
 }
