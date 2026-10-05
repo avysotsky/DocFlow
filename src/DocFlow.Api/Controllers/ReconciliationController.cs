@@ -12,13 +12,16 @@ public sealed class ReconciliationController : ControllerBase
 {
     private readonly IInvoicePurchaseOrderReconciliationService _service;
     private readonly IReconciliationCaseService _caseService;
+    private readonly IReconciliationCaseExportService _caseExportService;
 
     public ReconciliationController(
         IInvoicePurchaseOrderReconciliationService service,
-        IReconciliationCaseService caseService)
+        IReconciliationCaseService caseService,
+        IReconciliationCaseExportService caseExportService)
     {
         _service = service;
         _caseService = caseService;
+        _caseExportService = caseExportService;
     }
 
     [HttpPost("invoice-po")]
@@ -129,6 +132,44 @@ public sealed class ReconciliationController : ControllerBase
             cancellationToken);
 
         return snapshot is null ? NotFound() : Ok(snapshot);
+    }
+
+    [HttpGet("cases/{caseId:guid}/export")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ExportCase(
+        Guid caseId,
+        [FromQuery] string format,
+        CancellationToken cancellationToken)
+    {
+        if (caseId == Guid.Empty)
+            return NotFound();
+
+        ReconciliationCaseExportFormat exportFormat;
+        switch (format?.Trim().ToLowerInvariant())
+        {
+            case "reconciliation-csv":
+                exportFormat = ReconciliationCaseExportFormat.Csv;
+                break;
+            case "reconciliation-xlsx":
+                exportFormat = ReconciliationCaseExportFormat.Xlsx;
+                break;
+            default:
+                return BadRequest(
+                    "Format must be 'reconciliation-csv' or 'reconciliation-xlsx'.");
+        }
+
+        var file = await _caseExportService.ExportAsync(
+            User.GetRequiredCustomerId(),
+            caseId,
+            exportFormat,
+            cancellationToken);
+
+        return file is null
+            ? NotFound()
+            : File(file.Content, file.ContentType, file.FileName);
     }
 
     [HttpPost("cases/{caseId:guid}/decision")]
