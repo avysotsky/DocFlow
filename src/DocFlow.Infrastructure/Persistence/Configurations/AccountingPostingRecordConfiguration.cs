@@ -47,7 +47,8 @@ public sealed class AccountingPostingRecordConfiguration
                 x.TargetAccount,
                 x.IdempotencyKey
             })
-            .IsUnique();
+            .IsUnique()
+            .HasDatabaseName("UX_AccountingPostingRecords_Idempotency");
 
         builder.HasIndex(x => x.DocumentId);
         builder.HasIndex(x => x.NextAttemptAt);
