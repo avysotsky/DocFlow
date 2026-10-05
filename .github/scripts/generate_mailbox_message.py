@@ -8,7 +8,7 @@ import base64
 from pathlib import Path
 
 
-def build(pdf: bytes, message_id: str, subject: str) -> bytes:
+def build(pdf: bytes, message_id: str, subject: str, attachment_name: str) -> bytes:
     encoded_pdf = base64.b64encode(pdf).decode("ascii")
     encoded_note = base64.b64encode(b"not a document").decode("ascii")
     text = f"""From: Billing Robot <billing@example.com>
@@ -30,8 +30,8 @@ Content-Transfer-Encoding: base64
 
 {encoded_note}
 --docflow-mailbox-e2e
-Content-Type: application/octet-stream; name="mailbox-invoice.pdf"
-Content-Disposition: attachment; filename="mailbox-invoice.pdf"
+Content-Type: application/octet-stream; name="{attachment_name}"
+Content-Disposition: attachment; filename="{attachment_name}"
 Content-Transfer-Encoding: base64
 
 {encoded_pdf}
@@ -46,6 +46,7 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--message-id", default="docflow-mailbox-e2e@example.test")
     parser.add_argument("--subject", default="Supplier invoice from mailbox")
+    parser.add_argument("--attachment-name", default="mailbox-invoice.pdf")
     args = parser.parse_args()
 
     pdf = Path(args.pdf).read_bytes()
@@ -53,7 +54,7 @@ def main() -> None:
         raise SystemExit("Input file is not a PDF")
 
     Path(args.output).write_bytes(
-        build(pdf, args.message_id, args.subject)
+        build(pdf, args.message_id, args.subject, args.attachment_name)
     )
 
 
