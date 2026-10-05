@@ -55,12 +55,21 @@ public sealed class ReconciliationCaseService : IReconciliationCaseService
             JsonSerializer.Serialize(report),
             createdByClient);
 
+        var createdEvent = new ReconciliationCaseAuditEvent(
+            entity.Id,
+            "Created",
+            null,
+            entity.ReviewStatus,
+            null,
+            createdByClient);
+
         _dbContext.ReconciliationCases.Add(entity);
+        _dbContext.ReconciliationCaseAuditEvents.Add(createdEvent);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new ReconciliationCaseCreateResult(
             InvoicePoReconciliationOutcome.Completed,
-            ToSnapshot(entity, report));
+            ToSnapshot(entity, report, [createdEvent]));
     }
 
     public async Task<ReconciliationCaseSnapshot?> GetAsync(
@@ -77,17 +86,87 @@ public sealed class ReconciliationCaseService : IReconciliationCaseService
         if (entity is null)
             return null;
 
-        var report = JsonSerializer.Deserialize<InvoicePoReconciliationReport>(
-            entity.ReportJson)
+        var auditEvents = await LoadAuditEventsAsync(caseId, cancellationToken);
+        return ToSnapshot(entity, DeserializeReport(entity), auditEvents);
+    }
+
+    public async Task<ReconciliationCaseDecisionResult> DecideAsync(
+        Guid customerId,
+        Guid caseId,
+        ReconciliationReviewDecision decision,
+        string? note,
+        string performedByClient,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.ReconciliationCases
+            .SingleOrDefaultAsync(
+                item => item.Id == caseId && item.CustomerId == customerId,
+                cancellationToken);
+
+        if (entity is null)
+        {
+            return new ReconciliationCaseDecisionResult(
+                ReconciliationCaseDecisionOutcome.NotFound);
+        }
+
+        if (decision is ReconciliationReviewDecision.Reject
+            or ReconciliationReviewDecision.Resolve
+            && string.IsNullOrWhiteSpace(note))
+        {
+            return new ReconciliationCaseDecisionResult(
+                ReconciliationCaseDecisionOutcome.NoteRequired);
+        }
+
+        var action = decision.ToString();
+        string previousStatus;
+        try
+        {
+            previousStatus = entity.ApplyReviewDecision(action);
+        }
+        catch (InvalidOperationException)
+        {
+            return new ReconciliationCaseDecisionResult(
+                ReconciliationCaseDecisionOutcome.InvalidTransition);
+        }
+
+        var auditEvent = new ReconciliationCaseAuditEvent(
+            entity.Id,
+            action,
+            previousStatus,
+            entity.ReviewStatus,
+            note,
+            performedByClient);
+
+        _dbContext.ReconciliationCaseAuditEvents.Add(auditEvent);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var previousEvents = await LoadAuditEventsAsync(caseId, cancellationToken);
+
+        return new ReconciliationCaseDecisionResult(
+            ReconciliationCaseDecisionOutcome.Completed,
+            ToSnapshot(entity, DeserializeReport(entity), previousEvents));
+    }
+
+    private async Task<IReadOnlyList<ReconciliationCaseAuditEvent>> LoadAuditEventsAsync(
+        Guid caseId,
+        CancellationToken cancellationToken)
+        => await _dbContext.ReconciliationCaseAuditEvents
+            .AsNoTracking()
+            .Where(item => item.ReconciliationCaseId == caseId)
+            .OrderBy(item => item.OccurredAt)
+            .ThenBy(item => item.Id)
+            .ToArrayAsync(cancellationToken);
+
+    private static InvoicePoReconciliationReport DeserializeReport(
+        ReconciliationCase entity)
+        => JsonSerializer.Deserialize<InvoicePoReconciliationReport>(entity.ReportJson)
             ?? throw new InvalidOperationException(
                 $"Persisted reconciliation case '{entity.Id}' has an invalid report.");
 
-        return ToSnapshot(entity, report);
-    }
-
     private static ReconciliationCaseSnapshot ToSnapshot(
         ReconciliationCase entity,
-        InvoicePoReconciliationReport report)
+        InvoicePoReconciliationReport report,
+        IReadOnlyList<ReconciliationCaseAuditEvent> auditEvents)
         => new(
             entity.Id,
             entity.CustomerId,
@@ -98,5 +177,15 @@ public sealed class ReconciliationCaseService : IReconciliationCaseService
             entity.CreatedAt,
             entity.UpdatedAt,
             entity.CreatedByClient,
-            report);
+            report,
+            auditEvents
+                .Select(item => new ReconciliationCaseAuditEntry(
+                    item.Id,
+                    item.Action,
+                    item.PreviousStatus,
+                    item.NewStatus,
+                    item.Note,
+                    item.PerformedByClient,
+                    item.OccurredAt))
+                .ToArray());
 }
