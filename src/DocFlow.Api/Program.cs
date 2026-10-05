@@ -146,6 +146,9 @@ builder.Services
     .Validate(
         options => options.BatchSize is >= 1 and <= 500,
         "Accounting posting BatchSize must be between 1 and 500.")
+    .Validate(
+        options => options.InProgressTimeoutSeconds is >= 1 and <= 86400,
+        "Accounting posting InProgressTimeoutSeconds must be between 1 and 86400.")
     .ValidateOnStart();
 
 builder.Services
