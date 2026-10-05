@@ -9,10 +9,6 @@ namespace DocFlow.Infrastructure.Processing;
 
 public sealed class AccountingPostingService : IAccountingPostingService
 {
-    private const int MaxAttempts = 3;
-    private const int BaseRetryDelaySeconds = 5;
-    private const int MaxRetryDelaySeconds = 60;
-
     private readonly DocFlowDbContext _dbContext;
     private readonly IReadOnlyDictionary<string, IAccountingPostingAdapter> _adapters;
 
@@ -145,13 +141,7 @@ public sealed class AccountingPostingService : IAccountingPostingService
         try
         {
             adapterResult = await adapter.PostAsync(
-                new AccountingPostingRequest(
-                    entity.Id,
-                    entity.CustomerId,
-                    entity.DocumentId,
-                    entity.TargetAccount,
-                    entity.IdempotencyKey,
-                    entity.PayloadJson),
+                AccountingPostingExecutionPolicy.CreateRequest(entity),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -166,7 +156,10 @@ public sealed class AccountingPostingService : IAccountingPostingService
                 ErrorSummary: exception.Message);
         }
 
-        ApplyAdapterResult(entity, adapterResult);
+        AccountingPostingExecutionPolicy.ApplyResult(
+            entity,
+            adapterResult,
+            DateTimeOffset.UtcNow);
         await _dbContext.SaveChangesAsync(CancellationToken.None);
 
         return new AccountingPostingCreateResult(
@@ -219,46 +212,6 @@ public sealed class AccountingPostingService : IAccountingPostingService
                 ? AccountingPostingCreateOutcome.Replay
                 : AccountingPostingCreateOutcome.Conflict,
             sameRequest ? ToSnapshot(existing) : null);
-    }
-
-    private static void ApplyAdapterResult(
-        AccountingPostingRecord entity,
-        AccountingPostingAdapterResult result)
-    {
-        var completedAt = DateTimeOffset.UtcNow;
-
-        switch (result.Outcome)
-        {
-            case AccountingPostingAdapterOutcome.Posted:
-                entity.MarkPosted(
-                    completedAt,
-                    result.ExternalReference
-                        ?? throw new InvalidOperationException(
-                            "Posted accounting result requires an external reference."));
-                break;
-
-            case AccountingPostingAdapterOutcome.RetryableFailure:
-                entity.MarkAttemptFailed(
-                    completedAt,
-                    result.ErrorSummary ?? "Accounting provider request failed.",
-                    MaxAttempts,
-                    BaseRetryDelaySeconds,
-                    MaxRetryDelaySeconds);
-                break;
-
-            case AccountingPostingAdapterOutcome.PermanentFailure:
-                entity.MarkAttemptFailed(
-                    completedAt,
-                    result.ErrorSummary ?? "Accounting provider rejected the request.",
-                    maxAttempts: 1,
-                    BaseRetryDelaySeconds,
-                    MaxRetryDelaySeconds);
-                break;
-
-            default:
-                throw new InvalidOperationException(
-                    $"Unsupported accounting adapter outcome '{result.Outcome}'.");
-        }
     }
 
     private static AccountingPostingSnapshot ToSnapshot(
