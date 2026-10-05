@@ -778,9 +778,17 @@ jobs:
             -X POST \
             -d "{\"documentId\":\"$invoice_document_id\",\"provider\":\"local-test\",\"targetAccount\":\"e2e-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
             http://127.0.0.1:5080/api/accounting-postings)
-          test "$posting_code" = "201"
+          if [ "$posting_code" != "201" ]; then
+            echo "Accounting posting create returned HTTP $posting_code"
+            cat /tmp/accounting-posting.json || true
+            echo
+            tail -n 200 /tmp/docflow-api.log || true
+            exit 1
+          fi
 
           posting_json=$(cat /tmp/accounting-posting.json)
+          echo "Accounting posting response:"
+          printf '%s' "$posting_json" | jq .
           posting_id=$(printf '%s' "$posting_json" | jq -r '.id')
           test -n "$posting_id"
           test "$posting_id" != "null"
@@ -830,6 +838,7 @@ jobs:
             -e PGPASSWORD=postgres postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
             "SELECT COUNT(*),MIN(\"Status\"),MIN(\"Attempts\"),MIN(COALESCE(\"ExternalReference\",'')),MIN(\"PayloadJson\"::jsonb #>> '{schemaVersion}'),MIN(\"PayloadJson\"::jsonb #>> '{invoiceNumber}'),MIN(\"PayloadJson\"::jsonb #>> '{supplierName}'),MIN(\"PayloadJson\"::jsonb #>> '{currency}'),MIN(\"PayloadJson\"::jsonb #>> '{taxRate}'),MIN(\"PayloadJson\"::jsonb #>> '{total}'),MIN(jsonb_array_length(\"PayloadJson\"::jsonb -> 'lines')) FROM \"AccountingPostingRecords\" WHERE \"CustomerId\"='$customer_id' AND \"Provider\"='local-test' AND \"TargetAccount\"='e2e-ledger' AND \"IdempotencyKey\"='invoice-posting-001';")
+          echo "Canonical accounting posting DB state: $posting_db_state"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f1)" = "1"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f2)" = "Posted"
           test "$(printf '%s' "$posting_db_state" | cut -d'|' -f3)" = "1"
