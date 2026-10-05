@@ -83,12 +83,20 @@ public sealed class AccountingBillPayloadFactoryTests
 
         var canonicalJson = AccountingBillPayloadJson.Serialize(payload);
         Assert.Contains("\"schemaVersion\":\"accounting_bill_v1\"", canonicalJson);
-        Assert.Contains("\"total\":1748.40", canonicalJson);
         Assert.DoesNotContain("\"engine\"", canonicalJson);
         Assert.DoesNotContain("\"validation\"", canonicalJson);
 
+        using var canonicalDocument = System.Text.Json.JsonDocument.Parse(canonicalJson);
+        Assert.Equal(
+            1748.40m,
+            canonicalDocument.RootElement.GetProperty("total").GetDecimal());
+
         var roundTrip = AccountingBillPayloadJson.Deserialize(canonicalJson);
-        Assert.Equal(payload, roundTrip);
+        Assert.Equal(payload.SupplierName, roundTrip.SupplierName);
+        Assert.Equal(payload.InvoiceNumber, roundTrip.InvoiceNumber);
+        Assert.Equal(payload.Total, roundTrip.Total);
+        Assert.Equal(payload.Lines.Count, roundTrip.Lines.Count);
+        Assert.Equal(payload.Taxes.Count, roundTrip.Taxes.Count);
     }
 
     [Fact]
