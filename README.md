@@ -7,8 +7,8 @@ The system converts digital or scanned PDF documents into validated structured d
 ## Current MVP flow
 
 ```text
-Authenticated customer API
-  -> single PDF upload or bounded multi-PDF batch intake
+Authenticated customer API or configured IMAP mailbox
+  -> RFC822 PDF attachment intake or direct PDF upload/bounded batch intake
   -> optional tenant-scoped Idempotency-Key for single and batch intake
   -> shared validation/storage/persistence intake service
   -> startup recovery of orphaned Uploaded/Processing work
@@ -42,6 +42,25 @@ Public Reference Benchmark #78
 ```
 
 ONNX/LLM extraction fallback is intentionally deferred. Real measured failure classes so far have been recoverable with deterministic layout/OCR rules, so model inference has not yet justified its additional cost and nondeterminism.
+
+## Mailbox / IMAP intake
+
+DocFlow can ingest RFC822/MIME email messages, retain source-message metadata, select PDF attachments, and submit accepted attachments through the same internal document-intake pipeline used by API uploads.
+
+The provider-neutral IMAP poller is configured under `Mailbox:Imap`. Each configured mailbox maps to a DocFlow tenant and persists an independent checkpoint keyed by tenant, mailbox name and folder. The checkpoint stores IMAP `UIDVALIDITY` and the last completed UID. On restart, polling resumes after the persisted UID; when `UIDVALIDITY` changes, the cursor resets for the new mailbox generation.
+
+Mailbox message identity and attachment persistence provide idempotent replay behavior. A message with the same stable identity and identical MIME payload replays the existing result; conflicting payload under the same identity is rejected rather than silently creating a second document.
+
+Automation E2E validates the real protocol path:
+
+```text
+SMTP -> GreenMail -> IMAP/MailKit -> RFC822 ingestion
+     -> PDF attachment -> Document -> extraction
+     -> persisted IMAP checkpoint -> API restart
+     -> second message -> checkpoint advances
+```
+
+The current implementation is generic IMAP with username/password credentials. Gmail OAuth, Microsoft Graph/Outlook OAuth and provider-specific mailbox APIs are **not** implemented or claimed.
 
 ## API authentication and tenant boundary
 
