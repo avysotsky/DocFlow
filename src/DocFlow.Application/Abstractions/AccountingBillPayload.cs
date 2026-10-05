@@ -16,6 +16,7 @@ public sealed record AccountingBillPayload(
     decimal? DiscountAmount,
     bool TaxInclusive,
     decimal? Subtotal,
+    decimal? TaxRate,
     decimal? TaxAmount,
     decimal Total,
     IReadOnlyList<AccountingBillTax> Taxes,
@@ -53,6 +54,27 @@ public static class AccountingBillPayloadJson
 
     public static AccountingBillPayload Deserialize(string json)
     {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        foreach (var requiredProperty in new[]
+                 {
+                     "schemaVersion",
+                     "supplierName",
+                     "invoiceNumber",
+                     "currency",
+                     "total",
+                     "lines",
+                     "taxes"
+                 })
+        {
+            if (!root.TryGetProperty(requiredProperty, out _))
+            {
+                throw new InvalidOperationException(
+                    $"Persisted accounting bill payload is missing required property '{requiredProperty}'.");
+            }
+        }
+
         var payload = JsonSerializer.Deserialize<AccountingBillPayload>(
             json,
             JsonOptions)
