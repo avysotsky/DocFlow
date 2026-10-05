@@ -33,6 +33,8 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
         if not po.items:
             po.items = self._extract_table_items(content)
         if not po.items:
+            po.items = self._extract_referenced_ukhsa_sparse_items(content)
+        if not po.items:
             po.items = self._extract_text_items(content)
         if not po.items:
             po.items = self._extract_sparse_net_amount_items(content)
@@ -296,6 +298,106 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             )
 
         return items
+
+    @classmethod
+    def _extract_referenced_ukhsa_sparse_items(
+        cls,
+        content: DocumentContent,
+    ) -> list[PurchaseOrderItem]:
+        """Recover UKHSA rows anchored by a supplier reference.
+
+        Some layout-preserved PDFs collapse the header into one line and place
+        UOM/quantity at the far right, while price cells are blank. Only rows
+        beginning with an explicit reference are treated as new items.
+        """
+        items: list[PurchaseOrderItem] = []
+
+        for page in content.pages:
+            lines = [line.rstrip() for line in page.text.splitlines() if line.strip()]
+            header_index = next(
+                (
+                    index
+                    for index, line in enumerate(lines)
+                    if "description" in cls._normalize(line)
+                    and "quantity" in cls._normalize(line)
+                    and "unit price" in cls._normalize(line)
+                    and "total price" in cls._normalize(line)
+                ),
+                None,
+            )
+            if header_index is None:
+                continue
+
+            index = header_index + 1
+            while index < len(lines):
+                line = lines[index].strip()
+                normalized = cls._normalize(line)
+                if cls._is_item_section_terminator(normalized):
+                    break
+
+                match = re.match(
+                    r"^(?P<reference>[A-Z0-9][A-Z0-9._/-]{4,})\s{2,}"
+                    r"(?P<body>.+?)"
+                    r"(?:\s{2,}(?P<unit>[A-Za-z][A-Za-z0-9 /.-]{0,24}))?"
+                    r"(?:\s{2,}(?P<quantity>\d+(?:[.,]\d+)?))?\s*$",
+                    line,
+                    flags=re.IGNORECASE,
+                )
+                if match is None:
+                    index += 1
+                    continue
+
+                reference = match.group("reference")
+                body = match.group("body").strip()
+                unit = match.group("unit")
+                quantity = cls._parse_decimal(match.group("quantity"))
+
+                description_parts = [body]
+                need_by_date: date | None = None
+                cursor = index + 1
+                while cursor < len(lines):
+                    candidate = lines[cursor].strip()
+                    candidate_normalized = cls._normalize(candidate)
+                    if cls._is_item_section_terminator(candidate_normalized):
+                        break
+                    if re.match(
+                        r"^[A-Z0-9][A-Z0-9._/-]{4,}\s{2,}",
+                        candidate,
+                        flags=re.IGNORECASE,
+                    ):
+                        break
+
+                    need_by = re.search(
+                        r"\bneed\s+by\s+date\s+"
+                        r"(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})\b",
+                        candidate,
+                        flags=re.IGNORECASE,
+                    )
+                    if need_by:
+                        need_by_date = cls._parse_date(need_by.group("date"))
+                        break
+
+                    if re.search(r"[A-Za-z]", candidate):
+                        description_parts.append(candidate)
+                    cursor += 1
+
+                description = " ".join(description_parts)
+                description = " ".join(description.split())
+                if description:
+                    items.append(
+                        PurchaseOrderItem(
+                            supplier_reference=reference,
+                            description=description,
+                            need_by_date=need_by_date,
+                            quantity=quantity,
+                            unit=unit.strip() if unit else None,
+                        )
+                    )
+
+                index = max(cursor + 1, index + 1)
+
+        return cls._deduplicate_items(items)
+
 
     @classmethod
     def _extract_text_items(cls, content: DocumentContent) -> list[PurchaseOrderItem]:
