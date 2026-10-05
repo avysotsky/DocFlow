@@ -871,6 +871,16 @@ class DeterministicPurchaseOrderEngine(StructuredExtractionEngine):
             elif normalized.startswith("grand total"):
                 po.total = numbers[-1]
 
+        # Vertically emitted summaries may put the Grand Total value on the next line.
+        if po.total is None:
+            for index, line in enumerate(lines[:-1]):
+                if cls._normalize(line) != "grand total":
+                    continue
+                next_value = cls._parse_decimal(lines[index + 1])
+                if next_value is not None:
+                    po.total = next_value
+                    break
+
         # Some PDF layouts emit the three summary labels in one visual block.
         # Only use this fallback for values that were not already extracted line-by-line.
         if po.subtotal is None or po.tax_amount is None or po.total is None:
