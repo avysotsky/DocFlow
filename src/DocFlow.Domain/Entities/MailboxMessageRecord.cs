@@ -48,7 +48,7 @@ public sealed class MailboxMessageRecord
         InternetMessageId = NormalizeOptional(internetMessageId, MaxInternetMessageIdLength, nameof(internetMessageId));
         Sender = NormalizeOptional(sender, MaxSenderLength, nameof(sender));
         Subject = NormalizeOptional(subject, MaxSubjectLength, nameof(subject));
-        ReceivedAt = receivedAt;
+        ReceivedAt = receivedAt?.ToUniversalTime();
         CreatedAt = DateTimeOffset.UtcNow;
     }
 
