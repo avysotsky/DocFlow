@@ -150,6 +150,7 @@ jobs:
           Intake__Idempotency__CleanupBatchSize: 1
           AccountingPosting__Worker__PollIntervalSeconds: 1
           AccountingPosting__Worker__BatchSize: 10
+          AccountingPosting__Worker__InProgressTimeoutSeconds: 1
           Mailbox__Imap__Enabled: "true"
           Mailbox__Imap__PollIntervalSeconds: 1
           Mailbox__Imap__BatchSize: 10
@@ -866,6 +867,29 @@ jobs:
             and .provider == "local-test"
             and .targetAccount == "worker-ledger"
           ' >/dev/null
+
+          echo "Scenario 6a.2: stale in-progress accounting posting is recovered after interruption"
+          stale_posting_id='55555555-5555-4555-8555-555555555552'
+          docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO \"AccountingPostingRecords\" (\"Id\",\"CustomerId\",\"DocumentId\",\"Provider\",\"TargetAccount\",\"IdempotencyKey\",\"PayloadJson\",\"Status\",\"Attempts\",\"CreatedAt\",\"UpdatedAt\",\"LastAttemptAt\",\"NextAttemptAt\") VALUES ('$stale_posting_id','$customer_id','$invoice_document_id','local-test','recovery-ledger','stale-posting-001','{\"document_type\":\"supplier_invoice\",\"data\":{\"invoice_number\":\"INV-RECOVERY-001\"}}'::jsonb,'Posting',1,NOW()-INTERVAL '10 seconds',NOW()-INTERVAL '10 seconds',NOW()-INTERVAL '10 seconds',NULL);"
+
+          stale_posting_state=""
+          for _ in $(seq 1 20); do
+            stale_posting_state=$(docker run --rm --network host \
+              -e PGPASSWORD=postgres postgres:16 \
+              psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+              "SELECT \"Status\",\"Attempts\",COALESCE(\"ExternalReference\",'') FROM \"AccountingPostingRecords\" WHERE \"Id\"='$stale_posting_id';")
+            if printf '%s' "$stale_posting_state" | grep -q '^Posted|2|local-posting:'; then
+              break
+            fi
+            sleep 1
+          done
+
+          test "$(printf '%s' "$stale_posting_state" | cut -d'|' -f1)" = "Posted"
+          test "$(printf '%s' "$stale_posting_state" | cut -d'|' -f2)" = "2"
+          test "$(printf '%s' "$stale_posting_state" | cut -d'|' -f3)" = "local-posting:55555555555545558555555555555552"
 
           echo "Scenario 6b: purchase order is processed and reconciles with its invoice"
           po_upload_json=$(curl -fsS \
