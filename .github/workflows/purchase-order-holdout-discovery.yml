@@ -7,6 +7,10 @@ on:
     paths:
       - '.github/scripts/build_purchase_order_holdout_discovery.py'
       - '.github/workflows/purchase-order-holdout-discovery.yml'
+      - 'src/DocFlow.Extraction.Worker/docflow_worker/engines/deterministic_purchase_order.py'
+      - 'src/DocFlow.Extraction.Worker/docflow_worker/validators/purchase_order.py'
+      - 'src/DocFlow.Extraction.Worker/docflow_worker/document_type_detector.py'
+      - 'src/DocFlow.Extraction.Worker/docflow_worker/structured_pipeline.py'
   workflow_dispatch:
 
 permissions:
