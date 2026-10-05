@@ -328,6 +328,35 @@ jobs:
             "SELECT COUNT(*) FROM \"Documents\" WHERE \"CustomerId\"='$customer_id' AND \"OriginalFileName\"='mailbox-invoice.pdf';")
           test "$primary_mailbox_document_count" = "1"
 
+          echo "Scenario 0b.1: replay repairs a lost mailbox-to-document link without duplicating Document"
+          mailbox_attachment_id=$(printf '%s' "$mailbox_json" | jq -r '.pdfAttachments[0].id')
+          docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -v ON_ERROR_STOP=1 -c \
+            "UPDATE \"MailboxAttachments\" SET \"DocumentId\"=NULL WHERE \"Id\"='$mailbox_attachment_id';"
+
+          repaired_replay_code=$(curl -sS -o /tmp/mailbox-repaired-replay.json -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: message/rfc822' \
+            --data-binary @/tmp/mailbox-message.eml \
+            http://127.0.0.1:5080/api/mailbox/messages/rfc822)
+          test "$repaired_replay_code" = "200"
+          repaired_replay_json=$(cat /tmp/mailbox-repaired-replay.json)
+          test "$(printf '%s' "$repaired_replay_json" | jq -r '.outcome')" = "Replay"
+          test "$(printf '%s' "$repaired_replay_json" | jq -r '.pdfAttachments[0].documentId')" = "$mailbox_document_id"
+
+          repaired_link=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+            "SELECT \"DocumentId\" FROM \"MailboxAttachments\" WHERE \"Id\"='$mailbox_attachment_id';")
+          test "$repaired_link" = "$mailbox_document_id"
+
+          repaired_document_count=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+            "SELECT COUNT(*) FROM \"Documents\" WHERE \"CustomerId\"='$customer_id' AND \"OriginalFileName\"='mailbox-invoice.pdf';")
+          test "$repaired_document_count" = "1"
+
           conflict_code=$(curl -sS -o /tmp/mailbox-conflict.json -w '%{http_code}' \
             "${auth_header[@]}" \
             -H 'Content-Type: message/rfc822' \
