@@ -25,6 +25,7 @@ public sealed class AccountingPostingsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<AccountingPostingSnapshot>> Create(
         [FromBody] CreateAccountingPostingRequest request,
         CancellationToken cancellationToken)
@@ -83,6 +84,10 @@ public sealed class AccountingPostingsController : ControllerBase
             case AccountingPostingCreateOutcome.ExtractionResultNotFound:
                 return NotFound(
                     "Document extraction result was not found.");
+
+            case AccountingPostingCreateOutcome.InvalidPayload:
+                return UnprocessableEntity(
+                    "Processed invoice does not contain a valid canonical accounting bill payload.");
 
             case AccountingPostingCreateOutcome.UnsupportedProvider:
                 return BadRequest(
