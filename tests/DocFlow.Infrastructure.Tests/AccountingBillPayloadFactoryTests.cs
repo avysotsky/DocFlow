@@ -66,6 +66,7 @@ public sealed class AccountingBillPayloadFactoryTests
         Assert.Equal("EUR", payload.Currency);
         Assert.Equal("PO-78421", payload.PurchaseOrderNumber);
         Assert.Equal(1457.00m, payload.Subtotal);
+        Assert.Equal(20m, payload.TaxRate);
         Assert.Equal(291.40m, payload.TaxAmount);
         Assert.Equal(1748.40m, payload.Total);
 
