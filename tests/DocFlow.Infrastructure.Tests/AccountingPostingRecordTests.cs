@@ -105,6 +105,6 @@ public sealed class AccountingPostingRecordTests
             "fake-accounting",
             "tenant-ledger",
             "posting-key-1",
-            "{"document_type":"supplier_invoice"}");
+            """{"document_type":"supplier_invoice"}""");
     }
 }
