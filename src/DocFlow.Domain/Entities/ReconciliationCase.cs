@@ -68,4 +68,38 @@ public sealed class ReconciliationCase
         CreatedAt = DateTimeOffset.UtcNow;
         UpdatedAt = CreatedAt;
     }
+
+    public string ApplyReviewDecision(string action)
+    {
+        if (string.IsNullOrWhiteSpace(action))
+            throw new ArgumentException("Review action is required.", nameof(action));
+
+        if (ReviewStatus is "Approved" or "Rejected" or "Resolved")
+        {
+            throw new InvalidOperationException(
+                $"Reconciliation case is already terminal with review status '{ReviewStatus}'.");
+        }
+
+        var previousStatus = ReviewStatus;
+        var normalizedAction = action.Trim();
+
+        ReviewStatus = normalizedAction switch
+        {
+            "Approve" => "Approved",
+            "Reject" => "Rejected",
+            "Resolve" when string.Equals(
+                previousStatus,
+                "NeedsReview",
+                StringComparison.Ordinal) => "Resolved",
+            "Resolve" => throw new InvalidOperationException(
+                "Only a NeedsReview reconciliation case can be resolved."),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(action),
+                action,
+                "Unsupported reconciliation review action.")
+        };
+
+        UpdatedAt = DateTimeOffset.UtcNow;
+        return previousStatus;
+    }
 }
