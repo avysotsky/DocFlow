@@ -440,6 +440,42 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("ReconciliationCases", (string)null);
                 });
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.ImapMailboxCheckpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FolderName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<long>("LastUid")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MailboxKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("UidValidity")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId", "MailboxKey", "FolderName")
+                        .IsUnique();
+
+                    b.ToTable("ImapMailboxCheckpoints", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.IntakeIdempotencyRecord", b =>
                 {
                     b.Property<Guid>("CustomerId")
