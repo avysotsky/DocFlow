@@ -214,42 +214,22 @@ Grand Total                 15,955.20
     assert po.total == Decimal("15955.20")
 
 
-def test_recovers_vertical_net_amount_po_without_treating_tax_percent_as_money() -> None:
+def test_recovers_layout_preserved_net_amount_po_without_inventing_line_totals() -> None:
     content = _content(
         """
 Purchase Order
-Order Date
-22-DEC-2022
-Supplier:
-Edwards Ltd
+Order Date              22-DEC-2022
+Supplier:   Edwards Ltd
 
-Line
-Part Number/Description
-Delivery Date
-Quantity
-UOM
-Unit Price
-(GBP)
-Tax
-Net Amount
-(GBP)
-1
-Supplier Item: Vacuum Pump
-From Quote
-01-MAR-2023
-Each
-20%
-2
-Supplier Item: Vacuum Pump
-From Quote
-Freight
-01-MAR-2023
-Each
-20%
-Total   3,247.60
-16,238.00
-Grand Total
-19,485.60
+Line     Part Number/Description               Delivery        Quantity  UOM      Unit Price    Tax      Net Amount
+                                               Date                                (GBP)                  (GBP)
+1          Supplier Item: Vacuum Pump          01-MAR-2023             Each               20%
+            From Quote
+2          Supplier Item: Vacuum Pump          01-MAR-2023             Each               20%
+            From Quote
+               Freight
+Total  3,247.60        16,238.00
+Grand Total                 19,485.60
 """
     )
 
@@ -258,50 +238,32 @@ Grand Total
 
     assert po.supplier_name == "Edwards Ltd"
     assert po.order_date == date(2022, 12, 22)
+    assert po.total == Decimal("19485.60")
     assert len(po.items) == 2
     assert po.items[0].description == "Supplier Item: Vacuum Pump From Quote"
     assert po.items[0].need_by_date == date(2023, 3, 1)
     assert po.items[0].unit == "Each"
     assert po.items[0].quantity is None
     assert po.items[0].unit_price is None
-    assert po.items[0].line_total == Decimal("3247.60")
+    assert po.items[0].line_total is None
     assert po.items[1].description == "Supplier Item: Vacuum Pump From Quote Freight"
-    assert po.items[1].line_total == Decimal("16238.00")
+    assert po.items[1].line_total is None
 
 
-def test_recovers_vertical_net_amount_po_with_blank_quantity_and_uom() -> None:
+def test_recovers_layout_preserved_net_amount_po_with_blank_quantity_and_uom() -> None:
     content = _content(
         """
 Purchase Order UKR10015660.0
-Order
-UKR10015660
-Order Date
-19/AUG/2025
-Supplier:
-Passageways (UK) Ltd (OnBoard)
+Order               UKR10015660
+Order Date                 19/AUG/2025
+Supplier:    Passageways (UK) Ltd (OnBoard)
 
-Line
-Part Number/Description
-Delivery Date
-Quantity
-UOM
-Unit Price
-(GBP)
-Tax
-Net Amount
-(GBP)
-1
-DDaT25311 - Board Paper
-Management Tool Licences
-22/JUL/2025
-40,049.75
-20%
-40,049.75
-Total
-8,009.95
-40,049.75
-Grand Total
-48,059.70
+Line Part Number/Description        Delivery Date   Quantity    UOM       Unit Price       Tax          Net Amount
+                                                                    (GBP)                       (GBP)
+1   DDaT25311 - Board Paper    22/JUL/2025                             40,049.75    20%                40,049.75
+      Management Tool Licences
+Total           8,009.95           40,049.75
+Grand Total                           48,059.70
 """
     )
 
@@ -313,6 +275,7 @@ Grand Total
     assert po.purchase_order_number == "UKR10015660"
     assert po.order_date == date(2025, 8, 19)
     assert po.supplier_name == "Passageways (UK) Ltd (OnBoard)"
+    assert po.total == Decimal("48059.70")
     assert len(po.items) == 1
     assert po.items[0].description == "DDaT25311 - Board Paper Management Tool Licences"
     assert po.items[0].need_by_date == date(2025, 7, 22)
@@ -320,4 +283,4 @@ Grand Total
     assert po.items[0].unit is None
     assert po.items[0].unit_price == Decimal("40049.75")
     assert po.items[0].line_total == Decimal("40049.75")
-    assert po.total == Decimal("48059.70")
+
