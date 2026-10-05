@@ -109,8 +109,8 @@ public sealed class ReconciliationCaseService : IReconciliationCaseService
                 ReconciliationCaseDecisionOutcome.NotFound);
         }
 
-        if (decision is ReconciliationReviewDecision.Reject
-            or ReconciliationReviewDecision.Resolve
+        if ((decision is ReconciliationReviewDecision.Reject
+                or ReconciliationReviewDecision.Resolve)
             && string.IsNullOrWhiteSpace(note))
         {
             return new ReconciliationCaseDecisionResult(
