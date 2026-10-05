@@ -538,6 +538,35 @@ jobs:
           other_tenant_case_code=$(curl -sS -o /dev/null -w '%{http_code}'             -H "X-DocFlow-Api-Key: $other_api_key"             "http://127.0.0.1:5080/api/reconciliation/cases/$match_case_id")
           test "$other_tenant_case_code" = "404"
 
+          echo "Scenario 6b.2: clean Match case can be approved with immutable audit history"
+          approved_case_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d '{"decision":"Approve","note":"Verified exact invoice/PO match."}' \
+            "http://127.0.0.1:5080/api/reconciliation/cases/$match_case_id/decision")
+
+          printf '%s' "$approved_case_json" | jq -e '
+            .reviewStatus == "Approved"
+            and (.auditHistory | length) == 2
+            and .auditHistory[0].action == "Created"
+            and .auditHistory[0].previousStatus == null
+            and .auditHistory[0].newStatus == "Open"
+            and .auditHistory[1].action == "Approve"
+            and .auditHistory[1].previousStatus == "Open"
+            and .auditHistory[1].newStatus == "Approved"
+            and .auditHistory[1].note == "Verified exact invoice/PO match."
+            and .auditHistory[1].performedByClient == "e2e-primary"
+          ' >/dev/null
+
+          terminal_case_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d '{"decision":"Resolve","note":"Must not change a terminal case."}' \
+            "http://127.0.0.1:5080/api/reconciliation/cases/$match_case_id/decision")
+          test "$terminal_case_code" = "409"
+
           echo "Scenario 6c: valid but differently priced PO produces auditable NeedsReview"
           mismatch_po_upload_json=$(curl -fsS \
             "${auth_header[@]}" \
@@ -578,6 +607,59 @@ jobs:
             and .report.status == "NeedsReview"
             and any(.report.invoiceItems[0].checks[]; .field == "unit_price" and .status == "NeedsReview" and .delta == "-1")
             and any(.report.invoiceItems[0].checks[]; .field == "line_total" and .status == "NeedsReview" and .delta == "-20")
+          ' >/dev/null
+
+          echo "Scenario 6c.2: mismatch case can be resolved with reviewer note"
+          resolved_case_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d '{"decision":"Resolve","note":"Price difference accepted after supplier confirmation."}' \
+            "http://127.0.0.1:5080/api/reconciliation/cases/$mismatch_case_id/decision")
+
+          printf '%s' "$resolved_case_json" | jq -e '
+            .reviewStatus == "Resolved"
+            and (.auditHistory | length) == 2
+            and .auditHistory[0].action == "Created"
+            and .auditHistory[0].newStatus == "NeedsReview"
+            and .auditHistory[1].action == "Resolve"
+            and .auditHistory[1].previousStatus == "NeedsReview"
+            and .auditHistory[1].newStatus == "Resolved"
+            and .auditHistory[1].note == "Price difference accepted after supplier confirmation."
+            and .auditHistory[1].performedByClient == "e2e-primary"
+          ' >/dev/null
+
+          echo "Scenario 6c.3: mismatch case can be rejected and Reject requires a note"
+          reject_case_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "{\"invoiceDocumentId\":\"$invoice_document_id\",\"purchaseOrderDocumentId\":\"$mismatch_po_document_id\"}" \
+            http://127.0.0.1:5080/api/reconciliation/invoice-po/cases)
+          reject_case_id=$(printf '%s' "$reject_case_json" | jq -r '.id')
+
+          reject_without_note_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d '{"decision":"Reject"}' \
+            "http://127.0.0.1:5080/api/reconciliation/cases/$reject_case_id/decision")
+          test "$reject_without_note_code" = "400"
+
+          rejected_case_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d '{"decision":"Reject","note":"Invoice price does not match approved purchase order."}' \
+            "http://127.0.0.1:5080/api/reconciliation/cases/$reject_case_id/decision")
+
+          printf '%s' "$rejected_case_json" | jq -e '
+            .reviewStatus == "Rejected"
+            and (.auditHistory | length) == 2
+            and .auditHistory[1].action == "Reject"
+            and .auditHistory[1].previousStatus == "NeedsReview"
+            and .auditHistory[1].newStatus == "Rejected"
+            and .auditHistory[1].note == "Invoice price does not match approved purchase order."
           ' >/dev/null
 
           echo "Scenario 7: persisted extraction result exports to CSV and XLSX"
