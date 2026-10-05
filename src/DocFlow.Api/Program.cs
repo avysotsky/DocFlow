@@ -197,6 +197,7 @@ builder.Services.AddScoped<IExtractionResultExportService, ExtractionResultExpor
 builder.Services.AddScoped<IDocumentReviewService, DocumentReviewService>();
 builder.Services.AddScoped<IInvoicePurchaseOrderReconciliationService, InvoicePurchaseOrderReconciliationService>();
 builder.Services.AddScoped<IReconciliationCaseService, ReconciliationCaseService>();
+builder.Services.AddScoped<IReconciliationCaseExportService, ReconciliationCaseExportService>();
 builder.Services.AddScoped<IDocumentDeletionService, DocumentDeletionService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
