@@ -254,6 +254,57 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("ExtractionResults", (string)null);
                 });
 
+            modelBuilder.Entity("DocFlow.Domain.Entities.ReconciliationCase", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByClient")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InvoiceDocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PurchaseOrderDocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReconciliationStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ReportJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("ReviewStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InvoiceDocumentId");
+
+                    b.HasIndex("PurchaseOrderDocumentId");
+
+                    b.HasIndex("CustomerId", "CreatedAt");
+
+                    b.ToTable("ReconciliationCases", (string)null);
+                });
+
             modelBuilder.Entity("DocFlow.Domain.Entities.IntakeIdempotencyRecord", b =>
                 {
                     b.Property<Guid>("CustomerId")
@@ -313,6 +364,21 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                     b.HasOne("DocFlow.Domain.Entities.Document", null)
                         .WithOne()
                         .HasForeignKey("DocFlow.Domain.Entities.DocumentReview", "DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DocFlow.Domain.Entities.ReconciliationCase", b =>
+                {
+                    b.HasOne("DocFlow.Domain.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("InvoiceDocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DocFlow.Domain.Entities.Document", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderDocumentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
