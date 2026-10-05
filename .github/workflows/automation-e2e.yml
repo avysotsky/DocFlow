@@ -800,7 +800,7 @@ jobs:
             "${auth_header[@]}" \
             -H 'Content-Type: application/json' \
             -X POST \
-            -d "{\"documentId\":\"$invoice_document_id\",\"provider\":\"local-test\",\"targetAccount\":\"e2e-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
+            -d "{\"documentId\":\"$invoice_document_id\",\"targetKey\":\"primary-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
             http://127.0.0.1:5080/api/accounting-postings)
           if [ "$posting_code" != "201" ]; then
             echo "Accounting posting create returned HTTP $posting_code"
@@ -838,7 +838,7 @@ jobs:
             "${auth_header[@]}" \
             -H 'Content-Type: application/json' \
             -X POST \
-            -d "{\"documentId\":\"$invoice_document_id\",\"provider\":\"local-test\",\"targetAccount\":\"e2e-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
+            -d "{\"documentId\":\"$invoice_document_id\",\"targetKey\":\"primary-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
             http://127.0.0.1:5080/api/accounting-postings)
           test "$replay_posting_code" = "200"
           grep -qi '^Idempotency-Replayed: true' /tmp/accounting-posting-replay.headers
@@ -849,7 +849,7 @@ jobs:
             "${auth_header[@]}" \
             -H 'Content-Type: application/json' \
             -X POST \
-            -d "{\"documentId\":\"$mailbox_document_id\",\"provider\":\"local-test\",\"targetAccount\":\"e2e-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
+            -d "{\"documentId\":\"$mailbox_document_id\",\"targetKey\":\"primary-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
             http://127.0.0.1:5080/api/accounting-postings)
           test "$conflicting_posting_code" = "409"
 
