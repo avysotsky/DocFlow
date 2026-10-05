@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DocFlow.Infrastructure", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DocFlow.Api", "src\DocFlow.Api\DocFlow.Api.csproj", "{EE15A84D-54F6-40E6-835F-BFAACFE8A74B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DocFlow.Infrastructure.Tests", "tests\DocFlow.Infrastructure.Tests\DocFlow.Infrastructure.Tests.csproj", "{F4F72586-91F1-4A74-A8EA-C3BFA45F6B10}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,5 +34,9 @@ Global
 		{EE15A84D-54F6-40E6-835F-BFAACFE8A74B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EE15A84D-54F6-40E6-835F-BFAACFE8A74B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EE15A84D-54F6-40E6-835F-BFAACFE8A74B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F4F72586-91F1-4A74-A8EA-C3BFA45F6B10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F4F72586-91F1-4A74-A8EA-C3BFA45F6B10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F4F72586-91F1-4A74-A8EA-C3BFA45F6B10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F4F72586-91F1-4A74-A8EA-C3BFA45F6B10}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
