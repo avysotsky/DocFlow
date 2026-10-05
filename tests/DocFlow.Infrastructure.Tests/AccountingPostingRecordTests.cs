@@ -7,6 +7,20 @@ namespace DocFlow.Infrastructure.Tests;
 public sealed class AccountingPostingRecordTests
 {
     [Fact]
+    public void Constructor_NormalizesProviderIdentity()
+    {
+        var record = new AccountingPostingRecord(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "  LOCAL-TEST  ",
+            "tenant-ledger",
+            "posting-key-1",
+            """{"document_type":"supplier_invoice"}""");
+
+        Assert.Equal("local-test", record.Provider);
+    }
+
+    [Fact]
     public void PostingLifecycle_CompletesWithExternalReference()
     {
         var record = CreateRecord();
