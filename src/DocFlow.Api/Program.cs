@@ -138,6 +138,17 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services
+    .AddOptions<AccountingPostingWorkerOptions>()
+    .Bind(builder.Configuration.GetSection(AccountingPostingWorkerOptions.ConfigurationSection))
+    .Validate(
+        options => options.PollIntervalSeconds is >= 1 and <= 3600,
+        "Accounting posting PollIntervalSeconds must be between 1 and 3600.")
+    .Validate(
+        options => options.BatchSize is >= 1 and <= 500,
+        "Accounting posting BatchSize must be between 1 and 500.")
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<OperationalMetricsOptions>()
     .Bind(builder.Configuration.GetSection(OperationalMetricsOptions.ConfigurationSection))
     .Validate(
@@ -254,6 +265,7 @@ builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 builder.Services.AddHostedService<DocumentRetentionHostedService>();
 builder.Services.AddHostedService<IntakeIdempotencyCleanupHostedService>();
 builder.Services.AddHostedService<ImapMailboxPollingHostedService>();
+builder.Services.AddHostedService<AccountingPostingHostedService>();
 builder.Services.AddHostedService<WebhookDeliveryHostedService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
