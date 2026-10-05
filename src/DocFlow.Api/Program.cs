@@ -105,6 +105,39 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services
+    .AddOptions<ImapMailboxPollingOptions>()
+    .Bind(builder.Configuration.GetSection(ImapMailboxPollingOptions.ConfigurationSection))
+    .Validate(
+        options => options.PollIntervalSeconds is >= 1 and <= 3600,
+        "Mailbox IMAP PollIntervalSeconds must be between 1 and 3600.")
+    .Validate(
+        options => options.BatchSize is >= 1 and <= 500,
+        "Mailbox IMAP BatchSize must be between 1 and 500.")
+    .Validate(
+        options => !options.Enabled || options.Accounts.Count > 0,
+        "At least one IMAP account is required when mailbox polling is enabled.")
+    .Validate(
+        options => !options.Enabled || options.Accounts.All(account =>
+            !string.IsNullOrWhiteSpace(account.Name)
+            && account.Name.Length <= 100
+            && account.CustomerId != Guid.Empty
+            && !string.IsNullOrWhiteSpace(account.Host)
+            && account.Port is >= 1 and <= 65535
+            && !string.IsNullOrWhiteSpace(account.Username)
+            && !string.IsNullOrWhiteSpace(account.Password)
+            && !string.IsNullOrWhiteSpace(account.Folder)
+            && account.Folder.Length <= 255),
+        "Every enabled IMAP account must have valid name, customer, endpoint, credentials and folder.")
+    .Validate(
+        options => !options.Enabled
+            || options.Accounts
+                .Select(account => (account.CustomerId, Name: account.Name.Trim(), Folder: account.Folder.Trim()))
+                .Distinct()
+                .Count() == options.Accounts.Count,
+        "IMAP account CustomerId/Name/Folder combinations must be unique.")
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<OperationalMetricsOptions>()
     .Bind(builder.Configuration.GetSection(OperationalMetricsOptions.ConfigurationSection))
     .Validate(
@@ -202,6 +235,7 @@ builder.Services.AddScoped<IReconciliationCaseService, ReconciliationCaseService
 builder.Services.AddScoped<IReconciliationCaseExportService, ReconciliationCaseExportService>();
 builder.Services.AddScoped<IMailboxMessageParser, MimeMailboxMessageParser>();
 builder.Services.AddScoped<IMailboxMessageIngestionService, MailboxMessageIngestionService>();
+builder.Services.AddScoped<ImapMailboxPoller>();
 builder.Services.AddScoped<IDocumentDeletionService, DocumentDeletionService>();
 builder.Services.AddScoped<IDocumentProcessingService, DocumentProcessingService>();
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
@@ -213,6 +247,7 @@ builder.Services.AddHostedService<DocumentProcessingRecoveryHostedService>();
 builder.Services.AddHostedService<DocumentProcessingBackgroundService>();
 builder.Services.AddHostedService<DocumentRetentionHostedService>();
 builder.Services.AddHostedService<IntakeIdempotencyCleanupHostedService>();
+builder.Services.AddHostedService<ImapMailboxPollingHostedService>();
 builder.Services.AddHostedService<WebhookDeliveryHostedService>();
 
 var storageRoot = builder.Configuration["FileStorage:RootPath"] ?? "storage";
