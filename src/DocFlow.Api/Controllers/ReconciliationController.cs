@@ -131,6 +131,49 @@ public sealed class ReconciliationController : ControllerBase
         return snapshot is null ? NotFound() : Ok(snapshot);
     }
 
+    [HttpPost("cases/{caseId:guid}/decision")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(ReconciliationCaseSnapshot), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<ReconciliationCaseSnapshot>> DecideCase(
+        Guid caseId,
+        [FromBody] ReconciliationCaseDecisionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (caseId == Guid.Empty)
+            return NotFound();
+
+        if (request.Note?.Length > 2000)
+            return BadRequest("Decision note must not exceed 2000 characters.");
+
+        var result = await _caseService.DecideAsync(
+            User.GetRequiredCustomerId(),
+            caseId,
+            request.Decision,
+            request.Note,
+            User.GetRequiredClientName(),
+            cancellationToken);
+
+        return result.Outcome switch
+        {
+            ReconciliationCaseDecisionOutcome.Completed => Ok(result.Case!),
+            ReconciliationCaseDecisionOutcome.NotFound => NotFound(),
+            ReconciliationCaseDecisionOutcome.NoteRequired => BadRequest(
+                "Reject and Resolve decisions require a note."),
+            ReconciliationCaseDecisionOutcome.InvalidTransition => Conflict(
+                "The requested review decision is not valid for the current case status."),
+            _ => throw new InvalidOperationException(
+                $"Unsupported reconciliation case decision outcome '{result.Outcome}'.")
+        };
+    }
+
+    public sealed record ReconciliationCaseDecisionRequest(
+        ReconciliationReviewDecision Decision,
+        string? Note);
+
     public sealed record InvoicePoReconciliationRequest(
         Guid InvoiceDocumentId,
         Guid PurchaseOrderDocumentId);
