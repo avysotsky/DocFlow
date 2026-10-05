@@ -7,17 +7,35 @@ public sealed class ConfiguredAccountingPostingTargetResolver
     : IAccountingPostingTargetResolver
 {
     private readonly IReadOnlyDictionary<string, AccountingPostingTarget> _targets;
+    private readonly IReadOnlyDictionary<Guid, AccountingPostingTarget[]> _targetsByCustomer;
 
     public ConfiguredAccountingPostingTargetResolver(
         IOptions<AccountingPostingTargetsOptions> options)
     {
-        _targets = options.Value.Targets.ToDictionary(
-            target => ComposeKey(target.CustomerId, target.Key),
-            target => new AccountingPostingTarget(
-                target.Key.Trim(),
-                target.Provider.Trim().ToLowerInvariant(),
-                target.TargetAccount.Trim()),
+        var configuredTargets = options.Value.Targets
+            .Select(target => new
+            {
+                target.CustomerId,
+                Target = new AccountingPostingTarget(
+                    target.Key.Trim(),
+                    target.Provider.Trim().ToLowerInvariant(),
+                    target.TargetAccount.Trim())
+            })
+            .ToArray();
+
+        _targets = configuredTargets.ToDictionary(
+            item => ComposeKey(item.CustomerId, item.Target.Key),
+            item => item.Target,
             StringComparer.OrdinalIgnoreCase);
+
+        _targetsByCustomer = configuredTargets
+            .GroupBy(item => item.CustomerId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(item => item.Target)
+                    .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
     }
 
     public AccountingPostingTarget? Resolve(
@@ -33,6 +51,11 @@ public sealed class ConfiguredAccountingPostingTargetResolver
             ? target
             : null;
     }
+
+    public IReadOnlyList<AccountingPostingTarget> GetAvailable(Guid customerId)
+        => _targetsByCustomer.TryGetValue(customerId, out var targets)
+            ? targets
+            : [];
 
     private static string ComposeKey(Guid customerId, string targetKey)
         => $"{customerId:N}:{targetKey.Trim()}";
