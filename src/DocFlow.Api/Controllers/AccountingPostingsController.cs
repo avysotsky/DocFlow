@@ -32,14 +32,10 @@ public sealed class AccountingPostingsController : ControllerBase
     {
         if (request.DocumentId == Guid.Empty)
             return BadRequest("Document id is required.");
-        if (string.IsNullOrWhiteSpace(request.Provider))
-            return BadRequest("Provider is required.");
-        if (request.Provider.Trim().Length > 64)
-            return BadRequest("Provider must not exceed 64 characters.");
-        if (string.IsNullOrWhiteSpace(request.TargetAccount))
-            return BadRequest("Target account is required.");
-        if (request.TargetAccount.Trim().Length > 200)
-            return BadRequest("Target account must not exceed 200 characters.");
+        if (string.IsNullOrWhiteSpace(request.TargetKey))
+            return BadRequest("Target key is required.");
+        if (request.TargetKey.Trim().Length > 100)
+            return BadRequest("Target key must not exceed 100 characters.");
         if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
             return BadRequest("Idempotency key is required.");
         if (request.IdempotencyKey.Trim().Length > 128)
@@ -48,8 +44,7 @@ public sealed class AccountingPostingsController : ControllerBase
         var result = await _service.CreateAndPostAsync(
             User.GetRequiredCustomerId(),
             request.DocumentId,
-            request.Provider,
-            request.TargetAccount,
+            request.TargetKey,
             request.IdempotencyKey,
             cancellationToken);
 
@@ -89,6 +84,10 @@ public sealed class AccountingPostingsController : ControllerBase
                 return UnprocessableEntity(
                     "Processed invoice does not contain a valid canonical accounting bill payload.");
 
+            case AccountingPostingCreateOutcome.TargetNotFound:
+                return NotFound(
+                    "Accounting target was not found for the authenticated tenant.");
+
             case AccountingPostingCreateOutcome.UnsupportedProvider:
                 return BadRequest(
                     "The requested accounting provider is not configured.");
@@ -120,7 +119,6 @@ public sealed class AccountingPostingsController : ControllerBase
 
     public sealed record CreateAccountingPostingRequest(
         Guid DocumentId,
-        string Provider,
-        string TargetAccount,
+        string TargetKey,
         string IdempotencyKey);
 }
