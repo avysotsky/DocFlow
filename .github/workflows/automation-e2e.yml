@@ -768,6 +768,70 @@ jobs:
             and (.structuredData.data.items | length) == 5
           ' >/dev/null
 
+          echo "Scenario 6a: processed supplier invoice posts idempotently through local accounting adapter"
+          posting_code=$(curl -sS -D /tmp/accounting-posting.headers -o /tmp/accounting-posting.json -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "{\"documentId\":\"$invoice_document_id\",\"provider\":\"local-test\",\"targetAccount\":\"e2e-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
+            http://127.0.0.1:5080/api/accounting-postings)
+          test "$posting_code" = "201"
+
+          posting_json=$(cat /tmp/accounting-posting.json)
+          posting_id=$(printf '%s' "$posting_json" | jq -r '.id')
+          test -n "$posting_id"
+          test "$posting_id" != "null"
+          printf '%s' "$posting_json" | jq -e --arg document_id "$invoice_document_id" '
+            .documentId == $document_id
+            and .provider == "local-test"
+            and .targetAccount == "e2e-ledger"
+            and .idempotencyKey == "invoice-posting-001"
+            and .status == "Posted"
+            and .attempts == 1
+            and (.externalReference | startswith("local-posting:"))
+            and .lastError == null
+            and .nextAttemptAt == null
+          ' >/dev/null
+
+          persisted_posting_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            "http://127.0.0.1:5080/api/accounting-postings/$posting_id")
+          test "$(printf '%s' "$persisted_posting_json" | jq -r '.id')" = "$posting_id"
+          test "$(printf '%s' "$persisted_posting_json" | jq -r '.status')" = "Posted"
+
+          replay_posting_code=$(curl -sS -D /tmp/accounting-posting-replay.headers -o /tmp/accounting-posting-replay.json -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "{\"documentId\":\"$invoice_document_id\",\"provider\":\"local-test\",\"targetAccount\":\"e2e-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
+            http://127.0.0.1:5080/api/accounting-postings)
+          test "$replay_posting_code" = "200"
+          grep -qi '^Idempotency-Replayed: true' /tmp/accounting-posting-replay.headers
+          test "$(jq -r '.id' /tmp/accounting-posting-replay.json)" = "$posting_id"
+          test "$(jq -r '.attempts' /tmp/accounting-posting-replay.json)" = "1"
+
+          conflicting_posting_code=$(curl -sS -o /tmp/accounting-posting-conflict.txt -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "{\"documentId\":\"$mailbox_document_id\",\"provider\":\"local-test\",\"targetAccount\":\"e2e-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
+            http://127.0.0.1:5080/api/accounting-postings)
+          test "$conflicting_posting_code" = "409"
+
+          other_tenant_posting_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "X-DocFlow-Api-Key: $other_api_key" \
+            "http://127.0.0.1:5080/api/accounting-postings/$posting_id")
+          test "$other_tenant_posting_code" = "404"
+
+          posting_db_state=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT COUNT(*),MIN(\"Status\"),MIN(\"Attempts\"),MIN(COALESCE(\"ExternalReference\",'')),MIN((\"PayloadJson\"::jsonb #>> '{data,invoice_number}')) FROM \"AccountingPostingRecords\" WHERE \"CustomerId\"='$customer_id' AND \"Provider\"='local-test' AND \"TargetAccount\"='e2e-ledger' AND \"IdempotencyKey\"='invoice-posting-001';")
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f1)" = "1"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f2)" = "Posted"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f3)" = "1"
+          test "$(printf '%s' "$posting_db_state" | cut -d'|' -f5)" = "INV-2026-091"
+
           echo "Scenario 6b: purchase order is processed and reconciles with its invoice"
           po_upload_json=$(curl -fsS \
             "${auth_header[@]}" \
