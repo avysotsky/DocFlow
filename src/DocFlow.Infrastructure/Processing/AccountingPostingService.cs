@@ -11,15 +11,18 @@ public sealed class AccountingPostingService : IAccountingPostingService
 {
     private readonly DocFlowDbContext _dbContext;
     private readonly IAccountingBillPayloadFactory _payloadFactory;
+    private readonly IAccountingPostingTargetResolver _targetResolver;
     private readonly IReadOnlyDictionary<string, IAccountingPostingAdapter> _adapters;
 
     public AccountingPostingService(
         DocFlowDbContext dbContext,
         IAccountingBillPayloadFactory payloadFactory,
+        IAccountingPostingTargetResolver targetResolver,
         IEnumerable<IAccountingPostingAdapter> adapters)
     {
         _dbContext = dbContext;
         _payloadFactory = payloadFactory;
+        _targetResolver = targetResolver;
         _adapters = adapters.ToDictionary(
             adapter => adapter.Provider,
             StringComparer.OrdinalIgnoreCase);
@@ -28,14 +31,20 @@ public sealed class AccountingPostingService : IAccountingPostingService
     public async Task<AccountingPostingCreateResult> CreateAndPostAsync(
         Guid customerId,
         Guid documentId,
-        string provider,
-        string targetAccount,
+        string targetKey,
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        var normalizedProvider = provider.Trim().ToLowerInvariant();
-        var normalizedTarget = targetAccount.Trim();
         var normalizedKey = idempotencyKey.Trim();
+        var target = _targetResolver.Resolve(customerId, targetKey);
+        if (target is null)
+        {
+            return new AccountingPostingCreateResult(
+                AccountingPostingCreateOutcome.TargetNotFound);
+        }
+
+        var normalizedProvider = target.Provider;
+        var normalizedTarget = target.TargetAccount;
 
         if (!_adapters.TryGetValue(normalizedProvider, out var adapter))
         {
