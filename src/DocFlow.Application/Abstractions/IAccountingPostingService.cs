@@ -11,6 +11,7 @@ public enum AccountingPostingCreateOutcome
     InvalidDocumentType,
     DocumentNotReady,
     ExtractionResultNotFound,
+    InvalidPayload,
     UnsupportedProvider
 }
 
