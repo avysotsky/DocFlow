@@ -9,6 +9,7 @@ using DocFlow.Api.OpenApi;
 using DocFlow.Api.Retention;
 using DocFlow.Application.Abstractions;
 using DocFlow.Application.Observability;
+using DocFlow.Infrastructure.Accounting.QuickBooksOnline;
 using DocFlow.Infrastructure.Documents;
 using DocFlow.Infrastructure.Export;
 using DocFlow.Infrastructure.Mailbox;
@@ -271,6 +272,16 @@ builder.Services.AddScoped<IReconciliationCaseService, ReconciliationCaseService
 builder.Services.AddScoped<IReconciliationCaseExportService, ReconciliationCaseExportService>();
 builder.Services.AddScoped<IAccountingBillPayloadFactory, AccountingBillPayloadFactory>();
 builder.Services.AddSingleton<IAccountingPostingTargetResolver, ConfiguredAccountingPostingTargetResolver>();
+var quickBooksMappings = builder.Configuration
+    .GetSection(QuickBooksOnlineBillMappingOptions.ConfigurationSection)
+    .Get<QuickBooksOnlineBillMappingOptions>()
+    ?? new QuickBooksOnlineBillMappingOptions();
+
+ValidateQuickBooksOnlineMappings(quickBooksMappings);
+
+builder.Services.AddSingleton(quickBooksMappings);
+builder.Services.AddSingleton<QuickBooksOnlineBillRequestBuilder>();
+
 builder.Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
 if (builder.Environment.IsDevelopment())
 {
@@ -336,3 +347,68 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static void ValidateQuickBooksOnlineMappings(
+    QuickBooksOnlineBillMappingOptions options)
+{
+    foreach (var target in options.Targets)
+    {
+        if (target.CustomerId == Guid.Empty
+            || string.IsNullOrWhiteSpace(target.TargetKey)
+            || string.IsNullOrWhiteSpace(target.ApAccountId)
+            || string.IsNullOrWhiteSpace(target.DefaultExpenseAccountId))
+        {
+            throw new InvalidOperationException(
+                "Every QuickBooks Online mapping requires customer, target key, AP account and default expense account.");
+        }
+
+        if (target.Vendors.Count == 0
+            || target.Vendors.Any(item =>
+                string.IsNullOrWhiteSpace(item.SupplierName)
+                || string.IsNullOrWhiteSpace(item.VendorId)))
+        {
+            throw new InvalidOperationException(
+                "Every QuickBooks Online mapping requires valid supplier-to-vendor mappings.");
+        }
+
+        if (target.Vendors
+            .Select(item => item.SupplierName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count() != target.Vendors.Count)
+        {
+            throw new InvalidOperationException(
+                "QuickBooks Online supplier mappings must be unique within a target.");
+        }
+
+        if (target.ExpenseAccounts.Any(item =>
+                string.IsNullOrWhiteSpace(item.Sku)
+                || string.IsNullOrWhiteSpace(item.AccountId))
+            || target.ExpenseAccounts
+                .Select(item => item.Sku.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count() != target.ExpenseAccounts.Count)
+        {
+            throw new InvalidOperationException(
+                "QuickBooks Online SKU expense-account mappings must be valid and unique within a target.");
+        }
+
+        if (target.TaxCodes.Any(item => string.IsNullOrWhiteSpace(item.TaxCodeId))
+            || target.TaxCodes
+                .Select(item => item.Rate)
+                .Distinct()
+                .Count() != target.TaxCodes.Count)
+        {
+            throw new InvalidOperationException(
+                "QuickBooks Online tax-code mappings must be valid and unique by rate within a target.");
+        }
+    }
+
+    if (options.Targets
+        .Select(target => $"{target.CustomerId:N}:{target.TargetKey.Trim()}")
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Count() != options.Targets.Count)
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online target mappings must be unique within each tenant.");
+    }
+}
