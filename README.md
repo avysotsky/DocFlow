@@ -108,7 +108,7 @@ The persisted payload uses the versioned `accounting_bill_v1` schema rather than
 
 Posting attempts are durable. Retryable failures return to `Pending` with bounded backoff; stale `Posting` attempts are recovered after the configured timeout and retried with the same idempotency key. `Posted` and terminal `Failed` records cannot be retried accidentally.
 
-The `local-test` adapter is registered only in Development. Live QuickBooks Online and Xero adapters, OAuth token handling and provider-specific account/vendor mappings are **not** implemented or claimed yet.
+The `local-test` adapter is registered only in Development. QuickBooks Online now has a deterministic Bill mapper and an HTTP adapter implementation, but it is **not registered as a live provider yet** because OAuth token acquisition/storage and real sandbox validation are not implemented. Xero live posting is also not implemented or claimed.
 
 ## API authentication and tenant boundary
 
