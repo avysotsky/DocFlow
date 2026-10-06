@@ -43,6 +43,85 @@ class Handler(BaseHTTPRequestHandler):
             self._write_json(200, {"status": "ok"})
             return
 
+        parsed = urlparse(self.path)
+        if parsed.path == "/v3/company/realm-e2e/query":
+            self._record("query", "")
+            if self.headers.get("Authorization") != "Bearer refreshed-access-token":
+                self._write_json(401, {"error": "unexpected_bearer_token"})
+                return
+
+            query = parse_qs(parsed.query).get("query", [""])[0]
+
+            if query.lower().startswith("select * from vendor"):
+                self._write_json(
+                    200,
+                    {
+                        "QueryResponse": {
+                            "Vendor": [
+                                {
+                                    "Id": "vendor-41",
+                                    "DisplayName": "ACME Components Ltd.",
+                                    "Active": True,
+                                },
+                                {
+                                    "Id": "vendor-99",
+                                    "DisplayName": "Backup Supplier",
+                                    "Active": False,
+                                },
+                            ]
+                        }
+                    },
+                )
+                return
+
+            if query.lower().startswith("select * from account"):
+                self._write_json(
+                    200,
+                    {
+                        "QueryResponse": {
+                            "Account": [
+                                {
+                                    "Id": "ap-33",
+                                    "Name": "Accounts Payable",
+                                    "FullyQualifiedName": "Accounts Payable",
+                                    "AccountType": "Accounts Payable",
+                                    "AccountSubType": "AccountsPayable",
+                                    "Active": True,
+                                },
+                                {
+                                    "Id": "expense-default",
+                                    "Name": "Office Expenses",
+                                    "FullyQualifiedName": "Expenses:Office Expenses",
+                                    "AccountType": "Expense",
+                                    "AccountSubType": "OfficeGeneralAdministrativeExpenses",
+                                    "Active": True,
+                                },
+                            ]
+                        }
+                    },
+                )
+                return
+
+            if query.lower().startswith("select * from taxcode"):
+                self._write_json(
+                    200,
+                    {
+                        "QueryResponse": {
+                            "TaxCode": [
+                                {
+                                    "Id": "vat-20",
+                                    "Name": "VAT 20%",
+                                    "Active": True,
+                                }
+                            ]
+                        }
+                    },
+                )
+                return
+
+            self._write_json(400, {"error": "unsupported_query"})
+            return
+
         self._write_json(404, {"error": "not_found"})
 
     def do_POST(self):
