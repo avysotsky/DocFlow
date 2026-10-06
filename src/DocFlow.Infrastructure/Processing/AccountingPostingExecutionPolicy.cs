@@ -41,7 +41,8 @@ public static class AccountingPostingExecutionPolicy
                     result.ErrorSummary ?? "Accounting provider request failed.",
                     MaxAttempts,
                     BaseRetryDelaySeconds,
-                    MaxRetryDelaySeconds);
+                    MaxRetryDelaySeconds,
+                    result.RetryAfterSeconds);
                 break;
 
             case AccountingPostingAdapterOutcome.PermanentFailure:
