@@ -1,5 +1,7 @@
 using DocFlow.Domain.Entities;
 using DocFlow.Domain.Enums;
+using DocFlow.Application.Abstractions;
+using DocFlow.Infrastructure.Processing;
 using Xunit;
 
 namespace DocFlow.Infrastructure.Tests;
@@ -119,6 +121,29 @@ public sealed class AccountingPostingRecordTests
 
         Assert.Equal(AccountingPostingStatus.Pending, record.Status);
         Assert.Equal(failedAt.AddSeconds(45), record.NextAttemptAt);
+    }
+
+    [Fact]
+    public void ExecutionPolicy_PropagatesProviderRetryDelay()
+    {
+        var record = CreateRecord();
+        var startedAt = new DateTimeOffset(
+            2026, 10, 6, 8, 30, 0, TimeSpan.Zero);
+        var failedAt = startedAt.AddSeconds(1);
+
+        record.MarkAttemptStarted(startedAt);
+
+        AccountingPostingExecutionPolicy.ApplyResult(
+            record,
+            new AccountingPostingAdapterResult(
+                AccountingPostingAdapterOutcome.RetryableFailure,
+                ErrorSummary: "QBO throttled",
+                RetryAfterSeconds: 45),
+            failedAt);
+
+        Assert.Equal(AccountingPostingStatus.Pending, record.Status);
+        Assert.Equal(failedAt.AddSeconds(45), record.NextAttemptAt);
+        Assert.Equal("QBO throttled", record.LastError);
     }
 
     [Fact]
