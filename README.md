@@ -106,7 +106,7 @@ POST /api/accounting-postings
 
 The persisted payload uses the versioned `accounting_bill_v1` schema rather than raw extraction JSON. It carries supplier/invoice identity, dates, currency, PO reference, normalized line items, discounts, tax data, total, payment terms and notes.
 
-Posting attempts are durable. Retryable failures return to `Pending` with bounded backoff; stale `Posting` attempts are recovered after the configured timeout and retried with the same idempotency key. `Posted` and terminal `Failed` records cannot be retried accidentally.
+Posting attempts are durable. Retryable failures return to `Pending` with bounded backoff; stale `Posting` attempts are recovered after the configured timeout and retried with the same idempotency key. For QBO, every Bill POST also carries a stable provider `requestid` derived from the immutable DocFlow posting id, so recovery reuses the same provider request identifier. Local E2E covers a simulated provider commit followed by a lost HTTP response; real Intuit sandbox duplicate-suppression semantics still require validation. `Posted` and terminal `Failed` records cannot be retried accidentally.
 
 The `local-test` adapter is registered only in Development. QuickBooks Online has a deterministic Bill mapper, HTTP adapter and OAuth connection subsystem. When QuickBooks OAuth is explicitly enabled, connected targets use encrypted access/refresh tokens with refresh-token rotation and the QBO adapter is registered. The complete flow is validated against a local fake Intuit server; a real Intuit sandbox Bill creation has **not** been validated yet. Xero live posting is also not implemented or claimed.
 
