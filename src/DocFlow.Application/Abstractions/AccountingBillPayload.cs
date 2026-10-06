@@ -52,6 +52,14 @@ public static class AccountingBillPayloadJson
     public static string Serialize(AccountingBillPayload payload)
         => JsonSerializer.Serialize(payload, JsonOptions);
 
+    public static bool SemanticEquals(string leftJson, string rightJson)
+    {
+        var left = Serialize(Deserialize(leftJson));
+        var right = Serialize(Deserialize(rightJson));
+
+        return string.Equals(left, right, StringComparison.Ordinal);
+    }
+
     public static AccountingBillPayload Deserialize(string json)
     {
         using var document = JsonDocument.Parse(json);
