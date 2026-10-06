@@ -69,6 +69,12 @@ public sealed class QuickBooksOnlineOAuthService
         string targetKey,
         CancellationToken cancellationToken = default)
     {
+        if (!_options.Enabled)
+        {
+            throw new InvalidOperationException(
+                "QuickBooks Online OAuth is not enabled.");
+        }
+
         var target = ResolveQuickBooksTarget(customerId, targetKey);
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.AddMinutes(_options.StateLifetimeMinutes);
@@ -99,6 +105,9 @@ public sealed class QuickBooksOnlineOAuthService
         string realmId,
         CancellationToken cancellationToken = default)
     {
+        if (!_options.Enabled)
+            return null;
+
         if (string.IsNullOrWhiteSpace(authorizationCode)
             || string.IsNullOrWhiteSpace(state)
             || string.IsNullOrWhiteSpace(realmId))
