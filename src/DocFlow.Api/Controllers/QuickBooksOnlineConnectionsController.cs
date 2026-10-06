@@ -111,7 +111,6 @@ public sealed class QuickBooksOnlineConnectionsController : ControllerBase
         QuickBooksOnlineConnectionSnapshot connection)
         => new(
             connection.TargetKey,
-            connection.RealmId,
             connection.AccessTokenExpiresAt,
             connection.RefreshTokenExpiresAt,
             connection.ConnectedAt,
@@ -124,7 +123,6 @@ public sealed class QuickBooksOnlineConnectionsController : ControllerBase
 
     public sealed record QuickBooksConnectionResponse(
         string TargetKey,
-        string RealmId,
         DateTimeOffset AccessTokenExpiresAt,
         DateTimeOffset RefreshTokenExpiresAt,
         DateTimeOffset ConnectedAt,
