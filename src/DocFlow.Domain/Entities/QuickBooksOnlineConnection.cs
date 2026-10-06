@@ -16,6 +16,7 @@ public sealed class QuickBooksOnlineConnection
     public DateTimeOffset RefreshTokenExpiresAt { get; private set; }
     public DateTimeOffset ConnectedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTimeOffset? DisconnectedAt { get; private set; }
 
     private QuickBooksOnlineConnection()
     {
@@ -55,6 +56,42 @@ public sealed class QuickBooksOnlineConnection
         UpdatedAt = connectedAt;
     }
 
+    public void Reconnect(
+        string realmId,
+        string protectedAccessToken,
+        DateTimeOffset accessTokenExpiresAt,
+        string protectedRefreshToken,
+        DateTimeOffset refreshTokenExpiresAt,
+        DateTimeOffset connectedAt)
+    {
+        RealmId = NormalizeRequired(realmId, MaxRealmIdLength, nameof(realmId));
+        ProtectedAccessToken = NormalizeRequired(
+            protectedAccessToken,
+            MaxProtectedTokenLength,
+            nameof(protectedAccessToken));
+        ProtectedRefreshToken = NormalizeRequired(
+            protectedRefreshToken,
+            MaxProtectedTokenLength,
+            nameof(protectedRefreshToken));
+
+        ValidateExpiry(accessTokenExpiresAt, refreshTokenExpiresAt, connectedAt);
+
+        AccessTokenExpiresAt = accessTokenExpiresAt;
+        RefreshTokenExpiresAt = refreshTokenExpiresAt;
+        ConnectedAt = connectedAt;
+        UpdatedAt = connectedAt;
+        DisconnectedAt = null;
+    }
+
+    public void Disconnect(DateTimeOffset disconnectedAt)
+    {
+        if (disconnectedAt < ConnectedAt)
+            throw new ArgumentOutOfRangeException(nameof(disconnectedAt));
+
+        DisconnectedAt = disconnectedAt;
+        UpdatedAt = disconnectedAt;
+    }
+
     public void RotateTokens(
         string protectedAccessToken,
         DateTimeOffset accessTokenExpiresAt,
@@ -76,6 +113,7 @@ public sealed class QuickBooksOnlineConnection
         AccessTokenExpiresAt = accessTokenExpiresAt;
         RefreshTokenExpiresAt = refreshTokenExpiresAt;
         UpdatedAt = updatedAt;
+        DisconnectedAt = null;
     }
 
     private static void ValidateExpiry(
