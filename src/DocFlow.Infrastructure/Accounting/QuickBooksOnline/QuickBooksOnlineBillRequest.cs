@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace DocFlow.Infrastructure.Accounting.QuickBooksOnline;
 
-public sealed record QuickBooksOnlineReference(string Value);
+public sealed record QuickBooksOnlineReference(
+    [property: JsonPropertyName("value")] string Value);
 
 public sealed record QuickBooksOnlineBillRequest(
     QuickBooksOnlineReference VendorRef,
