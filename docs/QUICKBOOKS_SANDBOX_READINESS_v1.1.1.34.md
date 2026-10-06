@@ -195,9 +195,12 @@ It prints:
 - connection state;
 - active vendors;
 - active accounts;
-- active tax codes.
+- active tax codes;
+- current posting-mapping validation result.
 
-Use the output to select the real provider ids.
+During Phase 1, `mappingValidation.isValid` is expected to be false with `mapping_not_configured` because the posting overlay has not been enabled yet.
+
+Use the reference output to select the real provider ids.
 
 ## Mapping selection
 
@@ -261,6 +264,36 @@ The posting overlay configures:
 
 SKU-specific expense mappings remain optional and can be added later.
 
+## Validate configured mappings against QBO
+
+After restarting with the posting overlay, validate the configured provider ids before creating any Bill:
+
+```bash
+curl -sS \
+  -H "X-DocFlow-Api-Key: <DOCFLOW_API_KEY>" \
+  http://127.0.0.1:8080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox/mapping-validation
+```
+
+Expected result:
+
+```json
+{
+  "isValid": true,
+  "issues": []
+}
+```
+
+Validation checks the live connected QBO company and rejects/warns through explicit issue codes when:
+
+- configured AP account is missing, inactive or not Accounts Payable;
+- default/SKU expense account is missing, inactive or not expense-like;
+- configured Vendor id is missing or inactive;
+- configured TaxCode id is missing or inactive;
+- posting mappings are not configured;
+- the QBO connection is unavailable.
+
+Do not create the first sandbox Bill until `isValid` is true.
+
 ## First real sandbox Bill
 
 Use a processed `supplier_invoice` document and a fresh idempotency key:
@@ -309,11 +342,11 @@ Before production use, reproduce equivalent behavior against the real Intuit san
 
 ## Automated validation
 
-Reference-discovery source/build gate:
+Reference-discovery + mapping-validation source/build gate:
 
 ```text
 .NET CI
-run: 37460067991
+run: 37461121846
 result: SUCCESS
 ```
 
@@ -324,6 +357,8 @@ Automation E2E
 run: 37460280316
 result: SUCCESS
 ```
+
+A newer full E2E additionally validates configured QBO mappings against the fake provider before Bill creation; record its run id in this document after that workflow completes.
 
 The E2E proves:
 
