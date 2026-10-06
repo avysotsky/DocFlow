@@ -77,6 +77,14 @@ public sealed class QuickBooksOnlineOAuthService
 
         var target = ResolveQuickBooksTarget(customerId, targetKey);
         var now = DateTimeOffset.UtcNow;
+
+        await _dbContext.QuickBooksOnlineOAuthStates
+            .Where(item =>
+                item.ExpiresAt <= now
+                || (item.ConsumedAt != null
+                    && item.ConsumedAt <= now.AddHours(-1)))
+            .ExecuteDeleteAsync(cancellationToken);
+
         var expiresAt = now.AddMinutes(_options.StateLifetimeMinutes);
 
         var state = GenerateState();
