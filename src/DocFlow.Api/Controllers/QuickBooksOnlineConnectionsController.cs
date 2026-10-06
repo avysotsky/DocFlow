@@ -11,13 +11,16 @@ public sealed class QuickBooksOnlineConnectionsController : ControllerBase
 {
     private readonly IQuickBooksOnlineOAuthService _oauthService;
     private readonly QuickBooksOnlineReferenceDiscoveryService _referenceDiscovery;
+    private readonly QuickBooksOnlineMappingValidationService _mappingValidation;
 
     public QuickBooksOnlineConnectionsController(
         IQuickBooksOnlineOAuthService oauthService,
-        QuickBooksOnlineReferenceDiscoveryService referenceDiscovery)
+        QuickBooksOnlineReferenceDiscoveryService referenceDiscovery,
+        QuickBooksOnlineMappingValidationService mappingValidation)
     {
         _oauthService = oauthService;
         _referenceDiscovery = referenceDiscovery;
+        _mappingValidation = mappingValidation;
     }
 
     [Authorize]
@@ -126,6 +129,52 @@ public sealed class QuickBooksOnlineConnectionsController : ControllerBase
             return StatusCode(
                 StatusCodes.Status502BadGateway,
                 "QuickBooks Online reference discovery returned invalid data.");
+        }
+    }
+
+    [Authorize]
+    [HttpGet("targets/{targetKey}/mapping-validation")]
+    [ProducesResponseType(
+        typeof(QuickBooksOnlineMappingValidationResult),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<ActionResult<QuickBooksOnlineMappingValidationResult>> ValidateMapping(
+        string targetKey,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(targetKey))
+        {
+            return Ok(
+                new QuickBooksOnlineMappingValidationResult(
+                    false,
+                    [
+                        new QuickBooksOnlineMappingValidationIssue(
+                            "target_key_required",
+                            "Target key is required.")
+                    ]));
+        }
+
+        try
+        {
+            var result = await _mappingValidation.ValidateAsync(
+                User.GetRequiredCustomerId(),
+                targetKey,
+                cancellationToken);
+
+            return Ok(result);
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                "QuickBooks Online mapping validation failed.");
+        }
+        catch (InvalidOperationException)
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                "QuickBooks Online mapping validation returned invalid provider data.");
         }
     }
 
