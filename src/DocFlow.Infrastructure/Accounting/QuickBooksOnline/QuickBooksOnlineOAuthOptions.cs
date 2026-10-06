@@ -18,4 +18,5 @@ public sealed class QuickBooksOnlineOAuthOptions
     public int StateLifetimeMinutes { get; set; } = 10;
     public int AccessTokenRefreshSkewSeconds { get; set; } = 120;
     public string DataProtectionKeyRingPath { get; set; } = string.Empty;
+    public bool DevelopmentAllowNonOfficialEndpoints { get; set; }
 }
