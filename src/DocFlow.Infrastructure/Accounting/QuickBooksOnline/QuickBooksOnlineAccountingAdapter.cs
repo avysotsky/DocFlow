@@ -72,13 +72,19 @@ public sealed class QuickBooksOnlineAccountingAdapter
             Encoding.UTF8,
             "application/json");
 
+        using var timeoutSource =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+        timeoutSource.CancelAfter(
+            TimeSpan.FromSeconds(_options.RequestTimeoutSeconds));
+
         HttpResponseMessage response;
         try
         {
             response = await _httpClient.SendAsync(
                 httpRequest,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                timeoutSource.Token);
         }
         catch (OperationCanceledException)
             when (!cancellationToken.IsCancellationRequested)
