@@ -1,6 +1,8 @@
 # DocFlow v1.1.1.34 — QuickBooks Online HTTP Adapter
 
-Status: **HTTP ADAPTER VALIDATED / OAUTH NOT IMPLEMENTED**
+Status: **HTTP ADAPTER VALIDATED / OAUTH IMPLEMENTED LATER IN THIS MILESTONE**
+
+The OAuth/token subsystem described as missing below was subsequently implemented and locally validated. See `QUICKBOOKS_ONLINE_OAUTH_v1.1.1.34.md` for the current capability boundary.
 
 Branch:
 
