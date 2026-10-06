@@ -61,7 +61,9 @@ public sealed class QuickBooksOnlineAccountingAdapter
 
         using var httpRequest = new HttpRequestMessage(
             HttpMethod.Post,
-            CreateBillUri(request.TargetAccount));
+            CreateBillUri(
+                request.TargetAccount,
+                CreateProviderRequestId(request.PostingId)));
 
         httpRequest.Headers.Authorization =
             new AuthenticationHeaderValue("Bearer", accessToken.Trim());
@@ -158,7 +160,9 @@ public sealed class QuickBooksOnlineAccountingAdapter
         }
     }
 
-    private Uri CreateBillUri(string realmId)
+    private Uri CreateBillUri(
+        string realmId,
+        string providerRequestId)
     {
         var baseUri = new Uri(
             _options.BaseUrl.TrimEnd('/') + "/",
@@ -166,8 +170,12 @@ public sealed class QuickBooksOnlineAccountingAdapter
 
         return new Uri(
             baseUri,
-            $"v3/company/{Uri.EscapeDataString(realmId.Trim())}/bill");
+            $"v3/company/{Uri.EscapeDataString(realmId.Trim())}/bill"
+            + $"?requestid={Uri.EscapeDataString(providerRequestId)}");
     }
+
+    private static string CreateProviderRequestId(Guid postingId)
+        => postingId.ToString("N");
 
     private static string? TryReadBillId(string responseJson)
     {
