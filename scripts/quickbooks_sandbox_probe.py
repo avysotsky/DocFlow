@@ -53,6 +53,11 @@ def main():
         args.api_key,
     )
 
+    mapping_validation = get_json(
+        f"{base}/api/accounting-connections/quickbooks-online/targets/{target}/mapping-validation",
+        args.api_key,
+    )
+
     result = {
         "connection": {
             "targetKey": connection.get("targetKey"),
@@ -75,6 +80,7 @@ def main():
             for item in references.get("taxCodes", [])
             if item.get("active", True)
         ],
+        "mappingValidation": mapping_validation,
     }
 
     json.dump(result, sys.stdout, indent=2)
