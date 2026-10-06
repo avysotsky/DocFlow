@@ -282,6 +282,15 @@ ValidateQuickBooksOnlineMappings(quickBooksMappings);
 builder.Services.AddSingleton(quickBooksMappings);
 builder.Services.AddSingleton<QuickBooksOnlineBillRequestBuilder>();
 
+var quickBooksHttp = builder.Configuration
+    .GetSection(QuickBooksOnlineHttpOptions.ConfigurationSection)
+    .Get<QuickBooksOnlineHttpOptions>()
+    ?? new QuickBooksOnlineHttpOptions();
+
+ValidateQuickBooksOnlineHttpOptions(quickBooksHttp);
+
+builder.Services.AddSingleton(quickBooksHttp);
+
 builder.Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
 if (builder.Environment.IsDevelopment())
 {
@@ -347,6 +356,37 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static void ValidateQuickBooksOnlineHttpOptions(
+    QuickBooksOnlineHttpOptions options)
+{
+    if (options.RequestTimeoutSeconds is < 1 or > 120)
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online HTTP RequestTimeoutSeconds must be between 1 and 120.");
+    }
+
+    if (!Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseUri)
+        || !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online HTTP BaseUrl must be an absolute HTTPS URL.");
+    }
+
+    if (options.Enabled
+        && !string.Equals(
+            baseUri.Host,
+            "sandbox-quickbooks.api.intuit.com",
+            StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(
+            baseUri.Host,
+            "quickbooks.api.intuit.com",
+            StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "Enabled QuickBooks Online HTTP BaseUrl must use an official Intuit API host.");
+    }
+}
 
 static void ValidateQuickBooksOnlineMappings(
     QuickBooksOnlineBillMappingOptions options)
