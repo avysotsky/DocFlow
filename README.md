@@ -62,6 +62,54 @@ SMTP -> GreenMail -> IMAP/MailKit -> RFC822 ingestion
 
 The current implementation is generic IMAP with username/password credentials. Gmail OAuth, Microsoft Graph/Outlook OAuth and provider-specific mailbox APIs are **not** implemented or claimed.
 
+## Accounting posting
+
+DocFlow can turn a processed `supplier_invoice` into a provider-neutral canonical accounting bill and persist an idempotent posting record before delivery to an accounting adapter.
+
+Public clients select a tenant-scoped `targetKey`; they do not submit provider realm/account identifiers directly. Server configuration resolves the target key to a provider and provider account.
+
+Example configuration:
+
+```json
+{
+  "AccountingPosting": {
+    "Targets": [
+      {
+        "CustomerId": "11111111-1111-1111-1111-111111111111",
+        "Key": "primary-ledger",
+        "Provider": "local-test",
+        "TargetAccount": "internal-provider-account-id"
+      }
+    ]
+  }
+}
+```
+
+Available public targets:
+
+```text
+GET /api/accounting-postings/targets
+```
+
+The response exposes the public key and provider only; the resolved external account identifier remains internal.
+
+Create a posting:
+
+```text
+POST /api/accounting-postings
+{
+  "documentId": "<processed supplier invoice id>",
+  "targetKey": "primary-ledger",
+  "idempotencyKey": "<caller-stable key>"
+}
+```
+
+The persisted payload uses the versioned `accounting_bill_v1` schema rather than raw extraction JSON. It carries supplier/invoice identity, dates, currency, PO reference, normalized line items, discounts, tax data, total, payment terms and notes.
+
+Posting attempts are durable. Retryable failures return to `Pending` with bounded backoff; stale `Posting` attempts are recovered after the configured timeout and retried with the same idempotency key. `Posted` and terminal `Failed` records cannot be retried accidentally.
+
+The `local-test` adapter is registered only in Development. Live QuickBooks Online and Xero adapters, OAuth token handling and provider-specific account/vendor mappings are **not** implemented or claimed yet.
+
 ## API authentication and tenant boundary
 
 Customer-facing document endpoints require an API key in:
