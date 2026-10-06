@@ -29,7 +29,7 @@ public sealed class QuickBooksOnlineAccountingAdapterTests
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal(
-            "https://sandbox-quickbooks.api.intuit.com/v3/company/realm-123/bill",
+            "https://sandbox-quickbooks.api.intuit.com/v3/company/realm-123/bill?requestid=aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa",
             request.Uri);
         Assert.Equal("Bearer", request.AuthorizationScheme);
         Assert.Equal("test-access-token", request.AuthorizationParameter);
@@ -40,6 +40,27 @@ public sealed class QuickBooksOnlineAccountingAdapterTests
         Assert.Contains(
             "\"APAccountRef\":{\"value\":\"ap-33\"}",
             request.Body,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PostAsync_ReusesStableProviderRequestIdForSamePosting()
+    {
+        var handler = new RecordingHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """{"Bill":{"Id":"987","SyncToken":"0"}}"""));
+        var adapter = CreateAdapter(handler);
+        var posting = CreatePosting();
+
+        await adapter.PostAsync(posting);
+        await adapter.PostAsync(posting);
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(handler.Requests[0].Uri, handler.Requests[1].Uri);
+        Assert.EndsWith(
+            "?requestid=aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa",
+            handler.Requests[0].Uri,
             StringComparison.Ordinal);
     }
 
