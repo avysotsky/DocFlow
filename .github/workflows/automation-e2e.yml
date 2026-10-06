@@ -255,6 +255,24 @@ jobs:
           other_api_key='docflow-e2e-other-key'
           auth_header=(-H "X-DocFlow-Api-Key: $api_key")
 
+          echo "Scenario 0q: disabled QuickBooks OAuth cannot create connection state"
+          qbo_authorize_code=$(curl -sS -o /tmp/qbo-oauth-disabled.txt -w '%{http_code}' \
+            "${auth_header[@]}" \
+            -X POST \
+            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/primary-ledger/authorize)
+          test "$qbo_authorize_code" = "400"
+          grep -qi 'not enabled' /tmp/qbo-oauth-disabled.txt
+
+          qbo_callback_code=$(curl -sS -o /tmp/qbo-oauth-callback-disabled.txt -w '%{http_code}' \
+            "http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/callback?code=fake-code&state=fake-state&realmId=fake-realm")
+          test "$qbo_callback_code" = "400"
+
+          qbo_oauth_counts=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            'SELECT (SELECT COUNT(*) FROM "QuickBooksOnlineOAuthStates"), (SELECT COUNT(*) FROM "QuickBooksOnlineConnections");')
+          test "$qbo_oauth_counts" = "0|0"
+
           echo "Scenario 0a: webhook worker selects configured tenants only and bounds permanent failures"
           docker run --rm --network host \
             -e PGPASSWORD=postgres postgres:16 \
