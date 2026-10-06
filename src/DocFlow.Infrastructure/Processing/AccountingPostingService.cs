@@ -224,10 +224,9 @@ public sealed class AccountingPostingService : IAccountingPostingService
         string payloadJson)
     {
         var sameRequest = existing.DocumentId == documentId
-            && string.Equals(
+            && AccountingBillPayloadJson.SemanticEquals(
                 existing.PayloadJson,
-                payloadJson,
-                StringComparison.Ordinal);
+                payloadJson);
 
         return new AccountingPostingCreateResult(
             sameRequest
