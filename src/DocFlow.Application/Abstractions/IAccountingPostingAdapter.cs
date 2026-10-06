@@ -19,7 +19,8 @@ public sealed record AccountingPostingRequest(
 public sealed record AccountingPostingAdapterResult(
     AccountingPostingAdapterOutcome Outcome,
     string? ExternalReference = null,
-    string? ErrorSummary = null);
+    string? ErrorSummary = null,
+    int? RetryAfterSeconds = null);
 
 public interface IAccountingPostingAdapter
 {
