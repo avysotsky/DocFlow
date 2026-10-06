@@ -373,8 +373,7 @@ static void ValidateQuickBooksOnlineHttpOptions(
             "QuickBooks Online HTTP BaseUrl must be an absolute HTTPS URL.");
     }
 
-    if (options.Enabled
-        && !string.Equals(
+    if (!string.Equals(
             baseUri.Host,
             "sandbox-quickbooks.api.intuit.com",
             StringComparison.OrdinalIgnoreCase)
@@ -384,7 +383,7 @@ static void ValidateQuickBooksOnlineHttpOptions(
             StringComparison.OrdinalIgnoreCase))
     {
         throw new InvalidOperationException(
-            "Enabled QuickBooks Online HTTP BaseUrl must use an official Intuit API host.");
+            "QuickBooks Online HTTP BaseUrl must use an official Intuit API host.");
     }
 }
 
