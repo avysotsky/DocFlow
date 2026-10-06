@@ -8,6 +8,7 @@ on:
       - 'Dockerfile'
       - '.dockerignore'
       - 'compose.yaml'
+      - 'compose.quickbooks-sandbox.yaml'
       - '.env.example'
       - 'src/DocFlow.Api/Controllers/HealthController.cs'
       - '.github/workflows/deployment-smoke.yml'
@@ -29,6 +30,22 @@ jobs:
           DOCFLOW_POSTGRES_PASSWORD: docflow-smoke-password
           DOCFLOW_API_KEY: docflow-deployment-smoke-key
         run: docker compose -f compose.yaml config >/tmp/docflow-compose.yml
+
+      - name: Validate QuickBooks sandbox compose overlay
+        env:
+          DOCFLOW_POSTGRES_PASSWORD: docflow-smoke-password
+          DOCFLOW_API_KEY: docflow-deployment-smoke-key
+          DOCFLOW_QBO_ENABLED: "true"
+          DOCFLOW_QBO_REALM_ID: "sandbox-realm-placeholder"
+          DOCFLOW_QBO_CLIENT_ID: "sandbox-client-id-placeholder"
+          DOCFLOW_QBO_CLIENT_SECRET: "sandbox-client-secret-placeholder"
+          DOCFLOW_QBO_REDIRECT_URI: "https://example.test/api/accounting-connections/quickbooks-online/callback"
+        run: >-
+          docker compose
+          -f compose.yaml
+          -f compose.quickbooks-sandbox.yaml
+          config
+          >/tmp/docflow-qbo-compose.yml
 
       - name: Build production image
         run: docker build -t docflow:deployment-smoke .
