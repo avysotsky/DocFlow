@@ -11,6 +11,7 @@ public sealed record AccountingPostingRequest(
     Guid PostingId,
     Guid CustomerId,
     Guid DocumentId,
+    string TargetKey,
     string TargetAccount,
     string IdempotencyKey,
     AccountingBillPayload Payload);
