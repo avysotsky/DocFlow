@@ -108,7 +108,17 @@ The persisted payload uses the versioned `accounting_bill_v1` schema rather than
 
 Posting attempts are durable. Retryable failures return to `Pending` with bounded backoff; stale `Posting` attempts are recovered after the configured timeout and retried with the same idempotency key. `Posted` and terminal `Failed` records cannot be retried accidentally.
 
-The `local-test` adapter is registered only in Development. QuickBooks Online now has a deterministic Bill mapper and an HTTP adapter implementation, but it is **not registered as a live provider yet** because OAuth token acquisition/storage and real sandbox validation are not implemented. Xero live posting is also not implemented or claimed.
+The `local-test` adapter is registered only in Development. QuickBooks Online has a deterministic Bill mapper, HTTP adapter and OAuth connection subsystem. When QuickBooks OAuth is explicitly enabled, connected targets use encrypted access/refresh tokens with refresh-token rotation and the QBO adapter is registered. The complete flow is validated against a local fake Intuit server; a real Intuit sandbox Bill creation has **not** been validated yet. Xero live posting is also not implemented or claimed.
+
+QuickBooks connection endpoints:
+
+```text
+POST /api/accounting-connections/quickbooks-online/targets/{targetKey}/authorize
+GET  /api/accounting-connections/quickbooks-online/callback
+GET  /api/accounting-connections/quickbooks-online/targets/{targetKey}
+```
+
+OAuth state is stored only as a SHA-256 hash and is single-use. QBO access/refresh tokens are encrypted with ASP.NET Core Data Protection; enabling OAuth requires a persistent key ring. Public connection responses do not expose tokens or the QBO realm id.
 
 ## API authentication and tenant boundary
 
