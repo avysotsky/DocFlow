@@ -3,14 +3,19 @@
 import argparse
 import base64
 import json
+import socket
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 
 class Handler(BaseHTTPRequestHandler):
     output_path: Path
     expected_basic: str
+    bill_lock = threading.Lock()
+    bills_by_request_id: dict[str, str] = {}
+    lost_response_request_ids: set[str] = set()
 
     def log_message(self, format, *args):
         return
@@ -90,8 +95,29 @@ class Handler(BaseHTTPRequestHandler):
             self._write_json(400, {"error": "unsupported_grant_type"})
             return
 
-        if self.path == "/v3/company/realm-e2e/bill":
+        parsed = urlparse(self.path)
+        if parsed.path == "/v3/company/realm-e2e/bill":
+            query = parse_qs(parsed.query)
+            request_id = query.get("requestid", [""])[0]
             self._record("bill", body)
+
+            if not request_id:
+                self._write_json(
+                    400,
+                    {
+                        "Fault": {
+                            "Error": [
+                                {
+                                    "Message": "ValidationFault",
+                                    "Detail": "requestid is required for E2E Bill posting",
+                                    "code": "E2E-REQUEST-ID",
+                                }
+                            ],
+                            "type": "ValidationFault",
+                        }
+                    },
+                )
+                return
 
             if self.headers.get("Authorization") != "Bearer refreshed-access-token":
                 self._write_json(
@@ -139,11 +165,45 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
+            simulate_lost_response = (
+                payload.get("PrivateNote") == "E2E_SIMULATE_LOST_RESPONSE"
+            )
+
+            with self.bill_lock:
+                existing_bill_id = self.bills_by_request_id.get(request_id)
+                if existing_bill_id is None:
+                    bill_id = (
+                        "QBO-E2E-LOST-1"
+                        if simulate_lost_response
+                        else "QBO-E2E-1"
+                    )
+                    self.bills_by_request_id[request_id] = bill_id
+                    first_commit = True
+                else:
+                    bill_id = existing_bill_id
+                    first_commit = False
+
+            if simulate_lost_response and first_commit:
+                self._record("bill_commit_lost_response", body)
+                with self.bill_lock:
+                    self.lost_response_request_ids.add(request_id)
+
+                self.close_connection = True
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                self.connection.close()
+                return
+
+            if simulate_lost_response and not first_commit:
+                self._record("bill_replay", body)
+
             self._write_json(
                 200,
                 {
                     "Bill": {
-                        "Id": "QBO-E2E-1",
+                        "Id": bill_id,
                         "SyncToken": "0",
                     }
                 },
