@@ -156,6 +156,15 @@ jobs:
           AccountingPosting__Targets__0__Key: primary-ledger
           AccountingPosting__Targets__0__Provider: local-test
           AccountingPosting__Targets__0__TargetAccount: e2e-ledger
+          AccountingPosting__Targets__1__CustomerId: 11111111-1111-1111-1111-111111111111
+          AccountingPosting__Targets__1__Key: qbo-sandbox
+          AccountingPosting__Targets__1__Provider: quickbooks-online
+          AccountingPosting__Targets__1__TargetAccount: realm-e2e
+          AccountingPosting__QuickBooksOnline__OAuth__Enabled: "true"
+          AccountingPosting__QuickBooksOnline__OAuth__ClientId: e2e-client-id
+          AccountingPosting__QuickBooksOnline__OAuth__ClientSecret: e2e-client-secret
+          AccountingPosting__QuickBooksOnline__OAuth__RedirectUri: https://docflow.example/api/accounting-connections/quickbooks-online/callback
+          AccountingPosting__QuickBooksOnline__OAuth__DataProtectionKeyRingPath: /tmp/docflow-dp-keys
           AccountingPosting__Worker__PollIntervalSeconds: 1
           AccountingPosting__Worker__BatchSize: 10
           AccountingPosting__Worker__InProgressTimeoutSeconds: 1
@@ -255,23 +264,46 @@ jobs:
           other_api_key='docflow-e2e-other-key'
           auth_header=(-H "X-DocFlow-Api-Key: $api_key")
 
-          echo "Scenario 0q: disabled QuickBooks OAuth cannot create connection state"
-          qbo_authorize_code=$(curl -sS -o /tmp/qbo-oauth-disabled.txt -w '%{http_code}' \
+          echo "Scenario 0q: QuickBooks OAuth creates hashed one-time authorization state"
+          qbo_authorize_code=$(curl -sS -o /tmp/qbo-oauth-authorize.json -w '%{http_code}' \
             "${auth_header[@]}" \
             -X POST \
-            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/primary-ledger/authorize)
-          test "$qbo_authorize_code" = "400"
-          grep -qi 'not enabled' /tmp/qbo-oauth-disabled.txt
+            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox/authorize)
+          test "$qbo_authorize_code" = "200"
 
-          qbo_callback_code=$(curl -sS -o /tmp/qbo-oauth-callback-disabled.txt -w '%{http_code}' \
-            "http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/callback?code=fake-code&state=fake-state&realmId=fake-realm")
-          test "$qbo_callback_code" = "400"
+          qbo_authorization_url=$(jq -r '.authorizationUrl' /tmp/qbo-oauth-authorize.json)
+          printf '%s' "$qbo_authorization_url" | grep -q '^https://appcenter.intuit.com/connect/oauth2?'
+          printf '%s' "$qbo_authorization_url" | grep -q 'client_id=e2e-client-id'
+          printf '%s' "$qbo_authorization_url" | grep -q 'scope=com.intuit.quickbooks.accounting'
 
-          qbo_oauth_counts=$(docker run --rm --network host \
+          qbo_state=$(printf '%s' "$qbo_authorization_url" | python -c 'import sys, urllib.parse; u=urllib.parse.urlparse(sys.stdin.read().strip()); print(urllib.parse.parse_qs(u.query)["state"][0])')
+          test -n "$qbo_state"
+          qbo_state_hash=$(python -c 'import hashlib, sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest().upper())' "$qbo_state")
+
+          qbo_state_db=$(docker run --rm --network host \
             -e PGPASSWORD=postgres postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
-            'SELECT (SELECT COUNT(*) FROM "QuickBooksOnlineOAuthStates"), (SELECT COUNT(*) FROM "QuickBooksOnlineConnections");')
-          test "$qbo_oauth_counts" = "0|0"
+            "SELECT \"StateHash\",\"CustomerId\",\"TargetKey\",(\"ConsumedAt\" IS NULL) FROM \"QuickBooksOnlineOAuthStates\" ORDER BY \"CreatedAt\" DESC LIMIT 1;")
+          test "$(printf '%s' "$qbo_state_db" | cut -d'|' -f1)" = "$qbo_state_hash"
+          test "$(printf '%s' "$qbo_state_db" | cut -d'|' -f2)" = "$customer_id"
+          test "$(printf '%s' "$qbo_state_db" | cut -d'|' -f3)" = "qbo-sandbox"
+          test "$(printf '%s' "$qbo_state_db" | cut -d'|' -f4)" = "t"
+          test "$qbo_state_hash" != "$qbo_state"
+
+          qbo_connection_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "${auth_header[@]}" \
+            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox)
+          test "$qbo_connection_code" = "404"
+
+          qbo_invalid_callback_code=$(curl -sS -o /tmp/qbo-oauth-invalid-callback.txt -w '%{http_code}' \
+            "http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/callback?code=fake-code&state=unknown-state&realmId=realm-e2e")
+          test "$qbo_invalid_callback_code" = "400"
+
+          qbo_connection_count=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -c \
+            'SELECT COUNT(*) FROM "QuickBooksOnlineConnections";')
+          test "$qbo_connection_count" = "0"
 
           echo "Scenario 0a: webhook worker selects configured tenants only and bounds permanent failures"
           docker run --rm --network host \
