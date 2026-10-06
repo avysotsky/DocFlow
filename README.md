@@ -116,7 +116,19 @@ QuickBooks connection endpoints:
 POST /api/accounting-connections/quickbooks-online/targets/{targetKey}/authorize
 GET  /api/accounting-connections/quickbooks-online/callback
 GET  /api/accounting-connections/quickbooks-online/targets/{targetKey}
+GET  /api/accounting-connections/quickbooks-online/targets/{targetKey}/references
 ```
+
+The references endpoint performs read-only QBO queries for Vendor, Account and TaxCode objects so real sandbox mapping ids can be selected before Bill posting is enabled.
+
+Sandbox bootstrap is split into two compose overlays:
+
+```text
+compose.quickbooks-sandbox.yaml
+compose.quickbooks-sandbox-posting.yaml
+```
+
+Use the first for OAuth connection and reference discovery. Add the second only after Vendor/AP/Expense/Tax ids have been selected. The complete runbook is in `docs/QUICKBOOKS_SANDBOX_READINESS_v1.1.1.34.md`; `scripts/quickbooks_sandbox_probe.py` performs a read-only connection/reference check.
 
 OAuth state is stored only as a SHA-256 hash and is single-use. QBO access/refresh tokens are encrypted with ASP.NET Core Data Protection; enabling OAuth requires a persistent key ring. Public connection responses do not expose tokens or the QBO realm id.
 
