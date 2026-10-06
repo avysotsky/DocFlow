@@ -103,8 +103,27 @@ public sealed class QuickBooksOnlineAccountingAdapter
 
         using (response)
         {
-            var responseJson = await response.Content.ReadAsStringAsync(
-                cancellationToken);
+            string responseJson;
+            try
+            {
+                responseJson = await response.Content.ReadAsStringAsync(
+                    timeoutSource.Token);
+            }
+            catch (OperationCanceledException)
+                when (!cancellationToken.IsCancellationRequested)
+            {
+                return new AccountingPostingAdapterResult(
+                    AccountingPostingAdapterOutcome.RetryableFailure,
+                    ErrorSummary:
+                        "QuickBooks Online response body timed out.");
+            }
+            catch (HttpRequestException exception)
+            {
+                return new AccountingPostingAdapterResult(
+                    AccountingPostingAdapterOutcome.RetryableFailure,
+                    ErrorSummary:
+                        $"QuickBooks Online response body failure: {exception.Message}");
+            }
 
             if (response.IsSuccessStatusCode)
             {
