@@ -102,6 +102,58 @@ public sealed class AccountingBillPayloadFactoryTests
     }
 
     [Fact]
+    public void SemanticEquals_IgnoresJsonObjectPropertyOrder()
+    {
+        const string first = """
+        {
+          "schemaVersion":"accounting_bill_v1",
+          "supplierName":"ACME",
+          "invoiceNumber":"INV-1",
+          "invoiceDate":null,
+          "dueDate":null,
+          "currency":"EUR",
+          "customerReference":null,
+          "purchaseOrderNumber":null,
+          "lines":[],
+          "discountAmount":null,
+          "taxInclusive":false,
+          "subtotal":"100.00",
+          "taxRate":"20",
+          "taxAmount":"20.00",
+          "total":"120.00",
+          "taxes":[],
+          "paymentTerms":null,
+          "notes":null
+        }
+        """;
+
+        const string reordered = """
+        {
+          "total":120.00,
+          "taxes":[],
+          "notes":null,
+          "currency":"EUR",
+          "taxAmount":20.00,
+          "schemaVersion":"accounting_bill_v1",
+          "invoiceNumber":"INV-1",
+          "supplierName":"ACME",
+          "lines":[],
+          "invoiceDate":null,
+          "dueDate":null,
+          "customerReference":null,
+          "purchaseOrderNumber":null,
+          "discountAmount":null,
+          "taxInclusive":false,
+          "subtotal":100.00,
+          "taxRate":20,
+          "paymentTerms":null
+        }
+        """;
+
+        Assert.True(AccountingBillPayloadJson.SemanticEquals(first, reordered));
+    }
+
+    [Fact]
     public void Build_RejectsMissingRequiredTotal()
     {
         const string json = """
