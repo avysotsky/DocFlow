@@ -101,6 +101,27 @@ public sealed class AccountingPostingRecordTests
     }
 
     [Fact]
+    public void RetryableFailure_HonorsLongerProviderRetryDelay()
+    {
+        var record = CreateRecord();
+        var startedAt = new DateTimeOffset(
+            2026, 10, 6, 8, 30, 0, TimeSpan.Zero);
+        var failedAt = startedAt.AddSeconds(1);
+
+        record.MarkAttemptStarted(startedAt);
+        record.MarkAttemptFailed(
+            failedAt,
+            "provider throttled",
+            maxAttempts: 3,
+            baseRetryDelaySeconds: 5,
+            maxRetryDelaySeconds: 60,
+            retryAfterSeconds: 45);
+
+        Assert.Equal(AccountingPostingStatus.Pending, record.Status);
+        Assert.Equal(failedAt.AddSeconds(45), record.NextAttemptAt);
+    }
+
+    [Fact]
     public void InterruptedPosting_CanBeRecoveredForIdempotentRetry()
     {
         var record = CreateRecord();
