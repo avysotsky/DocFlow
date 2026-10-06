@@ -46,7 +46,10 @@ namespace DocFlow.Infrastructure.Persistence.Migrations
                         nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(
                         type: "timestamp with time zone",
-                        nullable: false)
+                        nullable: false),
+                    DisconnectedAt = table.Column<DateTimeOffset>(
+                        type: "timestamp with time zone",
+                        nullable: true)
                 },
                 constraints: table =>
                 {
