@@ -1067,6 +1067,39 @@ jobs:
           test "$(jq -r '.id' /tmp/qbo-posting-replay.json)" = "$qbo_posting_id"
           test "$(grep -c '"kind":"bill"' "$qbo_log")" = "1"
 
+          echo "Scenario 6a.q1: connected QuickBooks target discovers provider reference ids"
+          qbo_references_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox/references)
+
+          printf '%s' "$qbo_references_json" | jq -e '
+            (.vendors | length) == 2
+            and any(.vendors[];
+              .id == "vendor-41"
+              and .displayName == "ACME Components Ltd."
+              and .active == true)
+            and any(.vendors[];
+              .id == "vendor-99"
+              and .active == false)
+            and any(.accounts[];
+              .id == "ap-33"
+              and .accountType == "Accounts Payable")
+            and any(.accounts[];
+              .id == "expense-default"
+              and .accountType == "Expense")
+            and any(.taxCodes[];
+              .id == "vat-20"
+              and .name == "VAT 20%"
+              and .active == true)
+          ' >/dev/null
+
+          test "$(grep -c '"kind":"query"' "$qbo_log")" = "3"
+
+          qbo_other_references_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "X-DocFlow-Api-Key: $other_api_key" \
+            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox/references)
+          test "$qbo_other_references_code" = "404"
+
           echo "Scenario 6a.q2: lost QBO response retries with same provider request id without duplicate Bill"
           qbo_unknown_posting_id='66666666-6666-4666-8666-666666666661'
           qbo_unknown_request_id='66666666666646668666666666666661'
