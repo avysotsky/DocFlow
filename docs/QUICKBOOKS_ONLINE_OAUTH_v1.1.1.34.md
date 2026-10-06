@@ -193,7 +193,10 @@ The CI fake Intuit server implements:
 - refresh-token exchange;
 - refresh-token rotation;
 - QBO Bill POST;
-- deterministic Bill response.
+- deterministic Bill response;
+- stable provider `requestid` handling;
+- commit-with-lost-response simulation;
+- replay of the same provider request without creating a second logical Bill.
 
 The full E2E proves:
 
@@ -208,10 +211,15 @@ authorize endpoint
 -> refresh token exchange
 -> rotated refresh token encrypted
 -> refreshed bearer token used
--> POST QBO Bill
+-> POST QBO Bill with stable requestid derived from DocFlow posting id
 -> Bill.Id -> ExternalReference
--> replay returns existing posting
+-> DocFlow replay returns existing posting
 -> no duplicate QBO Bill HTTP call
+-> simulated provider commit followed by lost network response
+-> posting returns to Pending
+-> worker retries the same posting with the same requestid
+-> fake provider returns the already-created Bill
+-> DocFlow records the existing Bill.Id
 ```
 
 The fake server additionally validates:
@@ -230,7 +238,7 @@ Latest .NET gate covering OAuth source and unit tests:
 
 ```text
 .NET CI
-run: 37454123941
+run: 37455415360
 result: SUCCESS
 ```
 
@@ -238,7 +246,7 @@ Final full local integration gate:
 
 ```text
 Automation E2E
-run: 37454402157
+run: 37455593991
 result: SUCCESS
 ```
 
@@ -260,14 +268,23 @@ supplier invoice
 -> ExternalReference
 ```
 
-Not yet proven:
+Locally proven for unknown outcomes:
+
+- every QBO Bill POST carries a stable provider `requestid` derived from the immutable DocFlow posting id;
+- a retry of the same durable posting reuses the same `requestid`;
+- the fake provider can commit a Bill and intentionally drop the HTTP response;
+- DocFlow treats that transport loss as retryable;
+- the background worker retries the same posting;
+- the fake provider returns the already-created Bill for the repeated `requestid`;
+- DocFlow finishes as `Posted` with two attempts and one logical provider Bill.
+
+Still not proven against Intuit:
 
 - real Intuit user authorization;
 - real Intuit sandbox token exchange;
 - real QBO sandbox Bill creation;
 - actual sandbox vendor/account/tax ids;
-- provider behavior when QBO commits a Bill but the network response is lost;
-- provider-side reconciliation for that unknown-outcome case.
+- that QBO v3 Bill create honors `requestid` with the same duplicate-suppression semantics modeled by the local fake provider.
 
 Therefore do not claim production-ready or live QuickBooks Online integration yet.
 
@@ -284,4 +301,5 @@ Use a real Intuit sandbox:
 5. populate real sandbox vendor/AP/expense/tax mappings;
 6. create one sandbox Bill through DocFlow;
 7. verify returned Bill id in both DocFlow and QBO;
-8. simulate/characterize the unknown-outcome retry case before calling the integration production-ready.
+8. repeat the same QBO create using the same provider `requestid` and verify Intuit returns/reconciles the same logical Bill rather than creating a duplicate;
+9. simulate a lost-response/unknown-outcome case in sandbox before calling the integration production-ready.
