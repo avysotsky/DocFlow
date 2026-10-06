@@ -1095,6 +1095,15 @@ jobs:
 
           test "$(grep -c '"kind":"query"' "$qbo_log")" = "3"
 
+          qbo_mapping_validation_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox/mapping-validation)
+          printf '%s' "$qbo_mapping_validation_json" | jq -e '
+            .isValid == true
+            and (.issues | length) == 0
+          ' >/dev/null
+          test "$(grep -c '"kind":"query"' "$qbo_log")" = "6"
+
           qbo_other_references_code=$(curl -sS -o /dev/null -w '%{http_code}' \
             -H "X-DocFlow-Api-Key: $other_api_key" \
             http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox/references)
