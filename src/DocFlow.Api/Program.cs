@@ -315,6 +315,7 @@ builder.Services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>()
 builder.Services.AddHttpClient<IQuickBooksOnlineTokenClient, QuickBooksOnlineTokenClient>();
 builder.Services.AddScoped<IQuickBooksOnlineOAuthService, QuickBooksOnlineOAuthService>();
 builder.Services.AddScoped<IQuickBooksOnlineAccessTokenProvider, QuickBooksOnlineAccessTokenProvider>();
+builder.Services.AddHttpClient<QuickBooksOnlineReferenceDiscoveryService>();
 
 if (quickBooksOAuth.Enabled)
 {
