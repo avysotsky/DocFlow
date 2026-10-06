@@ -17,6 +17,7 @@ using DocFlow.Infrastructure.Persistence;
 using DocFlow.Infrastructure.Processing;
 using DocFlow.Infrastructure.Storage;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -291,6 +292,38 @@ ValidateQuickBooksOnlineHttpOptions(quickBooksHttp);
 
 builder.Services.AddSingleton(quickBooksHttp);
 
+var quickBooksOAuth = builder.Configuration
+    .GetSection(QuickBooksOnlineOAuthOptions.ConfigurationSection)
+    .Get<QuickBooksOnlineOAuthOptions>()
+    ?? new QuickBooksOnlineOAuthOptions();
+
+ValidateQuickBooksOnlineOAuthOptions(quickBooksOAuth);
+
+builder.Services.AddSingleton(quickBooksOAuth);
+
+var dataProtection = builder.Services
+    .AddDataProtection()
+    .SetApplicationName("DocFlow");
+
+if (quickBooksOAuth.Enabled)
+{
+    dataProtection.PersistKeysToFileSystem(
+        new DirectoryInfo(quickBooksOAuth.DataProtectionKeyRingPath));
+}
+
+builder.Services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
+builder.Services.AddHttpClient<IQuickBooksOnlineTokenClient, QuickBooksOnlineTokenClient>();
+builder.Services.AddScoped<IQuickBooksOnlineOAuthService, QuickBooksOnlineOAuthService>();
+builder.Services.AddScoped<IQuickBooksOnlineAccessTokenProvider, QuickBooksOnlineAccessTokenProvider>();
+
+if (quickBooksOAuth.Enabled)
+{
+    builder.Services.AddHttpClient<QuickBooksOnlineAccountingAdapter>();
+    builder.Services.AddScoped<IAccountingPostingAdapter>(
+        serviceProvider =>
+            serviceProvider.GetRequiredService<QuickBooksOnlineAccountingAdapter>());
+}
+
 builder.Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
 if (builder.Environment.IsDevelopment())
 {
@@ -356,6 +389,98 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static void ValidateQuickBooksOnlineOAuthOptions(
+    QuickBooksOnlineOAuthOptions options)
+{
+    if (options.StateLifetimeMinutes is < 1 or > 30)
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth StateLifetimeMinutes must be between 1 and 30.");
+    }
+
+    if (options.AccessTokenRefreshSkewSeconds is < 0 or > 600)
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth AccessTokenRefreshSkewSeconds must be between 0 and 600.");
+    }
+
+    if (!options.Enabled)
+        return;
+
+    if (string.IsNullOrWhiteSpace(options.ClientId)
+        || string.IsNullOrWhiteSpace(options.ClientSecret))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth ClientId and ClientSecret are required when OAuth is enabled.");
+    }
+
+    if (!Uri.TryCreate(
+            options.RedirectUri,
+            UriKind.Absolute,
+            out var redirectUri)
+        || !string.Equals(
+            redirectUri.Scheme,
+            Uri.UriSchemeHttps,
+            StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth RedirectUri must be an absolute HTTPS URL.");
+    }
+
+    if (!Uri.TryCreate(
+            options.AuthorizationUrl,
+            UriKind.Absolute,
+            out var authorizationUri)
+        || !string.Equals(
+            authorizationUri.Scheme,
+            Uri.UriSchemeHttps,
+            StringComparison.OrdinalIgnoreCase)
+        || !string.Equals(
+            authorizationUri.Host,
+            "appcenter.intuit.com",
+            StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth AuthorizationUrl must use the official Intuit authorization host.");
+    }
+
+    if (!Uri.TryCreate(
+            options.TokenUrl,
+            UriKind.Absolute,
+            out var tokenUri)
+        || !string.Equals(
+            tokenUri.Scheme,
+            Uri.UriSchemeHttps,
+            StringComparison.OrdinalIgnoreCase)
+        || !string.Equals(
+            tokenUri.Host,
+            "oauth.platform.intuit.com",
+            StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth TokenUrl must use the official Intuit token host.");
+    }
+
+    if (!options.Scope
+        .Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries
+                | StringSplitOptions.TrimEntries)
+        .Contains(
+            "com.intuit.quickbooks.accounting",
+            StringComparer.Ordinal))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth scope must include com.intuit.quickbooks.accounting.");
+    }
+
+    if (string.IsNullOrWhiteSpace(options.DataProtectionKeyRingPath))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth requires a persistent DataProtectionKeyRingPath.");
+    }
+}
 
 static void ValidateQuickBooksOnlineHttpOptions(
     QuickBooksOnlineHttpOptions options)
