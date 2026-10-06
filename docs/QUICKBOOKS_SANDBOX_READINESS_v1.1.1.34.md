@@ -350,15 +350,15 @@ run: 37461121846
 result: SUCCESS
 ```
 
-Reference-discovery full integration gate:
+Reference-discovery + mapping-validation full integration gate:
 
 ```text
 Automation E2E
-run: 37460280316
+run: 37461157752
 result: SUCCESS
 ```
 
-A newer full E2E additionally validates configured QBO mappings against the fake provider before Bill creation; record its run id in this document after that workflow completes.
+This run validates configured QBO mappings against the fake provider before Bill creation and also keeps the existing OAuth, token rotation, Bill posting, unknown-outcome recovery and restart-recovery scenarios green.
 
 The E2E proves:
 
