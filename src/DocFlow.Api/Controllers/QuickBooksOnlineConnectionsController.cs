@@ -10,11 +10,14 @@ namespace DocFlow.Api.Controllers;
 public sealed class QuickBooksOnlineConnectionsController : ControllerBase
 {
     private readonly IQuickBooksOnlineOAuthService _oauthService;
+    private readonly QuickBooksOnlineReferenceDiscoveryService _referenceDiscovery;
 
     public QuickBooksOnlineConnectionsController(
-        IQuickBooksOnlineOAuthService oauthService)
+        IQuickBooksOnlineOAuthService oauthService,
+        QuickBooksOnlineReferenceDiscoveryService referenceDiscovery)
     {
         _oauthService = oauthService;
+        _referenceDiscovery = referenceDiscovery;
     }
 
     [Authorize]
@@ -84,6 +87,49 @@ public sealed class QuickBooksOnlineConnectionsController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("targets/{targetKey}/references")]
+    [ProducesResponseType(
+        typeof(QuickBooksReferenceCatalogResponse),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<ActionResult<QuickBooksReferenceCatalogResponse>> GetReferences(
+        string targetKey,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(targetKey))
+            return NotFound();
+
+        try
+        {
+            var references = await _referenceDiscovery.DiscoverAsync(
+                User.GetRequiredCustomerId(),
+                targetKey,
+                cancellationToken);
+
+            return references is null
+                ? NotFound()
+                : Ok(new QuickBooksReferenceCatalogResponse(
+                    references.Vendors,
+                    references.Accounts,
+                    references.TaxCodes));
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                "QuickBooks Online reference discovery failed.");
+        }
+        catch (InvalidOperationException)
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                "QuickBooks Online reference discovery returned invalid data.");
+        }
+    }
+
+    [Authorize]
     [HttpGet("targets/{targetKey}")]
     [ProducesResponseType(
         typeof(QuickBooksConnectionResponse),
@@ -116,6 +162,11 @@ public sealed class QuickBooksOnlineConnectionsController : ControllerBase
             connection.ConnectedAt,
             connection.UpdatedAt,
             connection.IsConnected);
+
+    public sealed record QuickBooksReferenceCatalogResponse(
+        IReadOnlyList<QuickBooksOnlineVendorReference> Vendors,
+        IReadOnlyList<QuickBooksOnlineAccountReference> Accounts,
+        IReadOnlyList<QuickBooksOnlineTaxCodeReference> TaxCodes);
 
     public sealed record QuickBooksAuthorizationResponse(
         string AuthorizationUrl,
