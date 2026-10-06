@@ -828,12 +828,20 @@ jobs:
             and .lastError == null
             and .nextAttemptAt == null
           ' >/dev/null
+          echo "Accounting posting create assertions passed"
 
-          persisted_posting_json=$(curl -fsS \
+          persisted_posting_code=$(curl -sS -o /tmp/accounting-posting-get.json -w '%{http_code}' \
             "${auth_header[@]}" \
             "http://127.0.0.1:5080/api/accounting-postings/$posting_id")
+          if [ "$persisted_posting_code" != "200" ]; then
+            echo "Accounting posting GET returned HTTP $persisted_posting_code"
+            cat /tmp/accounting-posting-get.json || true
+            exit 1
+          fi
+          persisted_posting_json=$(cat /tmp/accounting-posting-get.json)
           test "$(printf '%s' "$persisted_posting_json" | jq -r '.id')" = "$posting_id"
           test "$(printf '%s' "$persisted_posting_json" | jq -r '.status')" = "Posted"
+          echo "Accounting posting GET assertions passed"
 
           replay_posting_code=$(curl -sS -D /tmp/accounting-posting-replay.headers -o /tmp/accounting-posting-replay.json -w '%{http_code}' \
             "${auth_header[@]}" \
@@ -841,7 +849,11 @@ jobs:
             -X POST \
             -d "{\"documentId\":\"$invoice_document_id\",\"targetKey\":\"primary-ledger\",\"idempotencyKey\":\"invoice-posting-001\"}" \
             http://127.0.0.1:5080/api/accounting-postings)
-          test "$replay_posting_code" = "200"
+          if [ "$replay_posting_code" != "200" ]; then
+            echo "Accounting posting replay returned HTTP $replay_posting_code"
+            cat /tmp/accounting-posting-replay.json || true
+            exit 1
+          fi
           grep -qi '^Idempotency-Replayed: true' /tmp/accounting-posting-replay.headers
           test "$(jq -r '.id' /tmp/accounting-posting-replay.json)" = "$posting_id"
           test "$(jq -r '.attempts' /tmp/accounting-posting-replay.json)" = "1"
