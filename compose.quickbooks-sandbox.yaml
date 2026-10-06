@@ -1,0 +1,18 @@
+services:
+  app:
+    environment:
+      AccountingPosting__Targets__0__CustomerId: "${DOCFLOW_CUSTOMER_ID:-11111111-1111-1111-1111-111111111111}"
+      AccountingPosting__Targets__0__Key: "${DOCFLOW_QBO_TARGET_KEY:-qbo-sandbox}"
+      AccountingPosting__Targets__0__Provider: "quickbooks-online"
+      AccountingPosting__Targets__0__TargetAccount: "${DOCFLOW_QBO_REALM_ID:?Set DOCFLOW_QBO_REALM_ID in .env}"
+      AccountingPosting__QuickBooksOnline__OAuth__Enabled: "${DOCFLOW_QBO_ENABLED:-true}"
+      AccountingPosting__QuickBooksOnline__OAuth__ClientId: "${DOCFLOW_QBO_CLIENT_ID:?Set DOCFLOW_QBO_CLIENT_ID in .env}"
+      AccountingPosting__QuickBooksOnline__OAuth__ClientSecret: "${DOCFLOW_QBO_CLIENT_SECRET:?Set DOCFLOW_QBO_CLIENT_SECRET in .env}"
+      AccountingPosting__QuickBooksOnline__OAuth__RedirectUri: "${DOCFLOW_QBO_REDIRECT_URI:?Set DOCFLOW_QBO_REDIRECT_URI in .env}"
+      AccountingPosting__QuickBooksOnline__OAuth__DataProtectionKeyRingPath: "/data/data-protection"
+      AccountingPosting__QuickBooksOnline__Http__BaseUrl: "https://sandbox-quickbooks.api.intuit.com"
+    volumes:
+      - docflow-qbo-dpkeys:/data/data-protection
+
+volumes:
+  docflow-qbo-dpkeys:
