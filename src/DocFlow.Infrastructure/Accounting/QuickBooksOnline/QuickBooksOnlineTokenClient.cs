@@ -19,10 +19,10 @@ public sealed class QuickBooksOnlineTokenClient
         _options = options;
     }
 
-    public Task<QuickBooksOnlineTokenSet> ExchangeAuthorizationCodeAsync(
+    public async Task<QuickBooksOnlineTokenSet> ExchangeAuthorizationCodeAsync(
         string authorizationCode,
         CancellationToken cancellationToken = default)
-        => SendTokenRequestAsync(
+        => await SendTokenRequestAsync(
             new Dictionary<string, string>
             {
                 ["grant_type"] = "authorization_code",
@@ -31,7 +31,9 @@ public sealed class QuickBooksOnlineTokenClient
             },
             existingRefreshToken: null,
             allowInvalidGrant: false,
-            cancellationToken)!;
+            cancellationToken)
+            ?? throw new InvalidOperationException(
+                "QuickBooks Online authorization-code exchange returned no token set.");
 
     public async Task<QuickBooksOnlineTokenSet?> RefreshAsync(
         string refreshToken,
