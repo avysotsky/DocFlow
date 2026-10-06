@@ -22,6 +22,8 @@ public sealed class DocFlowDbContext : DbContext
     public DbSet<MailboxMessageRecord> MailboxMessages => Set<MailboxMessageRecord>();
     public DbSet<MailboxAttachmentRecord> MailboxAttachments => Set<MailboxAttachmentRecord>();
     public DbSet<ImapMailboxCheckpoint> ImapMailboxCheckpoints => Set<ImapMailboxCheckpoint>();
+    public DbSet<QuickBooksOnlineConnection> QuickBooksOnlineConnections => Set<QuickBooksOnlineConnection>();
+    public DbSet<QuickBooksOnlineOAuthState> QuickBooksOnlineOAuthStates => Set<QuickBooksOnlineOAuthState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
