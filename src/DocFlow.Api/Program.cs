@@ -316,6 +316,7 @@ builder.Services.AddHttpClient<IQuickBooksOnlineTokenClient, QuickBooksOnlineTok
 builder.Services.AddScoped<IQuickBooksOnlineOAuthService, QuickBooksOnlineOAuthService>();
 builder.Services.AddScoped<IQuickBooksOnlineAccessTokenProvider, QuickBooksOnlineAccessTokenProvider>();
 builder.Services.AddHttpClient<QuickBooksOnlineReferenceDiscoveryService>();
+builder.Services.AddScoped<QuickBooksOnlineMappingValidationService>();
 
 if (quickBooksOAuth.Enabled)
 {
