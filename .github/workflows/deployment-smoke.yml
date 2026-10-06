@@ -9,6 +9,7 @@ on:
       - '.dockerignore'
       - 'compose.yaml'
       - 'compose.quickbooks-sandbox.yaml'
+      - 'compose.quickbooks-sandbox-posting.yaml'
       - '.env.example'
       - 'src/DocFlow.Api/Controllers/HealthController.cs'
       - '.github/workflows/deployment-smoke.yml'
@@ -46,6 +47,29 @@ jobs:
           -f compose.quickbooks-sandbox.yaml
           config
           >/tmp/docflow-qbo-compose.yml
+
+      - name: Validate QuickBooks sandbox posting mapping overlay
+        env:
+          DOCFLOW_POSTGRES_PASSWORD: docflow-smoke-password
+          DOCFLOW_API_KEY: docflow-deployment-smoke-key
+          DOCFLOW_QBO_ENABLED: "true"
+          DOCFLOW_QBO_REALM_ID: "sandbox-realm-placeholder"
+          DOCFLOW_QBO_CLIENT_ID: "sandbox-client-id-placeholder"
+          DOCFLOW_QBO_CLIENT_SECRET: "sandbox-client-secret-placeholder"
+          DOCFLOW_QBO_REDIRECT_URI: "https://example.test/api/accounting-connections/quickbooks-online/callback"
+          DOCFLOW_QBO_AP_ACCOUNT_ID: "ap-account-placeholder"
+          DOCFLOW_QBO_DEFAULT_EXPENSE_ACCOUNT_ID: "expense-account-placeholder"
+          DOCFLOW_QBO_VENDOR_NAME: "Sandbox Vendor"
+          DOCFLOW_QBO_VENDOR_ID: "vendor-placeholder"
+          DOCFLOW_QBO_TAX_RATE: "20"
+          DOCFLOW_QBO_TAX_CODE_ID: "tax-code-placeholder"
+        run: >-
+          docker compose
+          -f compose.yaml
+          -f compose.quickbooks-sandbox.yaml
+          -f compose.quickbooks-sandbox-posting.yaml
+          config
+          >/tmp/docflow-qbo-posting-compose.yml
 
       - name: Build production image
         run: docker build -t docflow:deployment-smoke .
