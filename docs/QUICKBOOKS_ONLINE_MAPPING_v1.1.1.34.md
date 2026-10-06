@@ -157,17 +157,23 @@ DocFlow supplier invoice
 -> accounting_bill_v1
 -> tenant QBO mappings
 -> deterministic QBO Bill request model / JSON
+-> QBO HTTP adapter implementation
+-> POST /v3/company/{realmId}/bill
+-> response/fault parsing
+-> retryable/permanent HTTP classification
+-> provider-directed Retry-After propagation
 ```
+
+The HTTP adapter is intentionally **not registered as a live provider** yet. It depends on `IQuickBooksOnlineAccessTokenProvider`, for which no production OAuth/token-storage implementation exists in this milestone.
 
 Not implemented yet:
 
-- Intuit OAuth 2.0;
-- access/refresh token storage;
-- token refresh;
-- live QBO HTTP client;
-- POST to /v3/company/{realmId}/bill;
-- QBO response/fault parsing;
-- sandbox integration test;
+- Intuit OAuth 2.0 authorization flow;
+- encrypted access/refresh token storage;
+- refresh-token rotation;
+- live adapter registration;
+- real QBO sandbox request;
+- provider-side recovery after an unknown-outcome POST;
 - vendor/account/tax discovery from QBO;
 - automatic creation of missing provider entities.
 
@@ -175,14 +181,14 @@ Do not claim live QuickBooks Online integration until a real QBO sandbox request
 
 ## Recommended next slice
 
-Add a QuickBooks Online HTTP adapter behind the existing `IAccountingPostingAdapter` contract, but keep token acquisition abstract.
+Add the OAuth connection/token subsystem and only then register `QuickBooksOnlineAccountingAdapter` as an `IAccountingPostingAdapter`.
 
 Recommended sequence:
 
-1. QBO access-token provider abstraction;
-2. typed HTTP client and sandbox/production base URL options;
-3. Bill POST with the deterministic request builder;
-4. classify HTTP/provider faults as retryable vs permanent;
-5. return created Bill id as `ExternalReference`;
-6. use DocFlow posting idempotency/recovery around the provider call;
-7. exercise a real Intuit sandbox only when credentials are available.
+1. durable tenant/target QBO connection record;
+2. encrypted refresh-token storage;
+3. OAuth authorization/callback flow;
+4. access-token refresh provider implementing `IQuickBooksOnlineAccessTokenProvider`;
+5. live adapter registration for connected targets;
+6. sandbox Bill POST;
+7. verify recovery/idempotency behavior for the case where QBO accepts a Bill but DocFlow loses the response.
