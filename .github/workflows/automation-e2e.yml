@@ -329,11 +329,46 @@ jobs:
             "http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/callback?code=fake-code&state=unknown-state&realmId=realm-e2e")
           test "$qbo_invalid_callback_code" = "400"
 
-          qbo_connection_count=$(docker run --rm --network host \
+          qbo_callback_code=$(curl -sS -o /tmp/qbo-oauth-callback.json -w '%{http_code}' \
+            "http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/callback?code=e2e-authorization-code&state=$qbo_state&realmId=realm-e2e")
+          test "$qbo_callback_code" = "200"
+          jq -e '
+            .targetKey == "qbo-sandbox"
+            and .isConnected == true
+            and (has("realmId") | not)
+            and (has("accessToken") | not)
+            and (has("refreshToken") | not)
+          ' /tmp/qbo-oauth-callback.json >/dev/null
+
+          qbo_connection_db=$(docker run --rm --network host \
+            -e PGPASSWORD=postgres postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d docflow -At -F '|' -c \
+            "SELECT \"RealmId\",(\"ProtectedAccessToken\" <> 'initial-access-token'),(\"ProtectedRefreshToken\" <> 'initial-refresh-token'),(\"DisconnectedAt\" IS NULL) FROM \"QuickBooksOnlineConnections\" WHERE \"CustomerId\"='$customer_id' AND \"TargetKey\"='qbo-sandbox';")
+          test "$(printf '%s' "$qbo_connection_db" | cut -d'|' -f1)" = "realm-e2e"
+          test "$(printf '%s' "$qbo_connection_db" | cut -d'|' -f2)" = "t"
+          test "$(printf '%s' "$qbo_connection_db" | cut -d'|' -f3)" = "t"
+          test "$(printf '%s' "$qbo_connection_db" | cut -d'|' -f4)" = "t"
+
+          qbo_state_consumed=$(docker run --rm --network host \
             -e PGPASSWORD=postgres postgres:16 \
             psql -h 127.0.0.1 -U postgres -d docflow -At -c \
-            'SELECT COUNT(*) FROM "QuickBooksOnlineConnections";')
-          test "$qbo_connection_count" = "0"
+            "SELECT (\"ConsumedAt\" IS NOT NULL) FROM \"QuickBooksOnlineOAuthStates\" WHERE \"StateHash\"='$qbo_state_hash';")
+          test "$qbo_state_consumed" = "t"
+
+          qbo_connection_json=$(curl -fsS \
+            "${auth_header[@]}" \
+            http://127.0.0.1:5080/api/accounting-connections/quickbooks-online/targets/qbo-sandbox)
+          printf '%s' "$qbo_connection_json" | jq -e '
+            .targetKey == "qbo-sandbox"
+            and .isConnected == true
+            and (has("realmId") | not)
+            and (has("accessToken") | not)
+            and (has("refreshToken") | not)
+          ' >/dev/null
+
+          test -n "$(find /tmp/docflow-dp-keys -type f -print -quit)"
+          test "$(grep -c '"kind":"token"' "$qbo_log")" = "1"
+          grep -q 'grant_type=authorization_code' "$qbo_log"
 
           echo "Scenario 0a: webhook worker selects configured tenants only and bounds permanent failures"
           docker run --rm --network host \
