@@ -128,7 +128,8 @@ public sealed class AccountingPostingRecord
         string errorSummary,
         int maxAttempts,
         int baseRetryDelaySeconds,
-        int maxRetryDelaySeconds)
+        int maxRetryDelaySeconds,
+        int? retryAfterSeconds = null)
     {
         if (Status != AccountingPostingStatus.Posting)
             throw new InvalidOperationException("Only an in-progress accounting posting can fail.");
@@ -157,9 +158,18 @@ public sealed class AccountingPostingRecord
         Status = AccountingPostingStatus.Pending;
         var exponent = Math.Min(Attempts - 1, 30);
         var multiplier = 1L << exponent;
-        var delaySeconds = Math.Min(
+        var calculatedDelaySeconds = Math.Min(
             (long)maxRetryDelaySeconds,
             (long)baseRetryDelaySeconds * multiplier);
+
+        var providerDelaySeconds = retryAfterSeconds is > 0
+            ? Math.Min((long)maxRetryDelaySeconds, retryAfterSeconds.Value)
+            : 0L;
+
+        var delaySeconds = Math.Max(
+            calculatedDelaySeconds,
+            providerDelaySeconds);
+
         NextAttemptAt = completedAt.AddSeconds(delaySeconds);
     }
 
