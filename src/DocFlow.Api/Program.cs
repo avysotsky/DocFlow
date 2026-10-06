@@ -288,7 +288,7 @@ var quickBooksHttp = builder.Configuration
     .Get<QuickBooksOnlineHttpOptions>()
     ?? new QuickBooksOnlineHttpOptions();
 
-ValidateQuickBooksOnlineHttpOptions(quickBooksHttp);
+ValidateQuickBooksOnlineHttpOptions(quickBooksHttp, builder.Environment.IsDevelopment());
 
 builder.Services.AddSingleton(quickBooksHttp);
 
@@ -297,7 +297,7 @@ var quickBooksOAuth = builder.Configuration
     .Get<QuickBooksOnlineOAuthOptions>()
     ?? new QuickBooksOnlineOAuthOptions();
 
-ValidateQuickBooksOnlineOAuthOptions(quickBooksOAuth);
+ValidateQuickBooksOnlineOAuthOptions(quickBooksOAuth, builder.Environment.IsDevelopment());
 
 builder.Services.AddSingleton(quickBooksOAuth);
 
@@ -391,7 +391,8 @@ app.MapControllers();
 app.Run();
 
 static void ValidateQuickBooksOnlineOAuthOptions(
-    QuickBooksOnlineOAuthOptions options)
+    QuickBooksOnlineOAuthOptions options,
+    bool isDevelopment)
 {
     if (options.StateLifetimeMinutes is < 1 or > 30)
     {
@@ -448,18 +449,35 @@ static void ValidateQuickBooksOnlineOAuthOptions(
     if (!Uri.TryCreate(
             options.TokenUrl,
             UriKind.Absolute,
-            out var tokenUri)
-        || !string.Equals(
+            out var tokenUri))
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth TokenUrl must be an absolute URL.");
+    }
+
+    var officialTokenEndpoint =
+        string.Equals(
             tokenUri.Scheme,
             Uri.UriSchemeHttps,
             StringComparison.OrdinalIgnoreCase)
-        || !string.Equals(
+        && string.Equals(
             tokenUri.Host,
             "oauth.platform.intuit.com",
-            StringComparison.OrdinalIgnoreCase))
+            StringComparison.OrdinalIgnoreCase);
+
+    if (!officialTokenEndpoint
+        && !(isDevelopment
+            && options.DevelopmentAllowNonOfficialEndpoints))
     {
         throw new InvalidOperationException(
-            "QuickBooks Online OAuth TokenUrl must use the official Intuit token host.");
+            "QuickBooks Online OAuth TokenUrl must use the official Intuit token host outside explicit Development testing.");
+    }
+
+    if (!isDevelopment
+        && options.DevelopmentAllowNonOfficialEndpoints)
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online OAuth DevelopmentAllowNonOfficialEndpoints cannot be enabled outside Development.");
     }
 
     if (!options.Scope
@@ -483,7 +501,8 @@ static void ValidateQuickBooksOnlineOAuthOptions(
 }
 
 static void ValidateQuickBooksOnlineHttpOptions(
-    QuickBooksOnlineHttpOptions options)
+    QuickBooksOnlineHttpOptions options,
+    bool isDevelopment)
 {
     if (options.RequestTimeoutSeconds is < 1 or > 120)
     {
@@ -491,24 +510,39 @@ static void ValidateQuickBooksOnlineHttpOptions(
             "QuickBooks Online HTTP RequestTimeoutSeconds must be between 1 and 120.");
     }
 
-    if (!Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseUri)
-        || !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    if (!Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseUri))
     {
         throw new InvalidOperationException(
-            "QuickBooks Online HTTP BaseUrl must be an absolute HTTPS URL.");
+            "QuickBooks Online HTTP BaseUrl must be an absolute URL.");
     }
 
-    if (!string.Equals(
-            baseUri.Host,
-            "sandbox-quickbooks.api.intuit.com",
+    var officialApiEndpoint =
+        string.Equals(
+            baseUri.Scheme,
+            Uri.UriSchemeHttps,
             StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(
-            baseUri.Host,
-            "quickbooks.api.intuit.com",
-            StringComparison.OrdinalIgnoreCase))
+        && (string.Equals(
+                baseUri.Host,
+                "sandbox-quickbooks.api.intuit.com",
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                baseUri.Host,
+                "quickbooks.api.intuit.com",
+                StringComparison.OrdinalIgnoreCase));
+
+    if (!officialApiEndpoint
+        && !(isDevelopment
+            && options.DevelopmentAllowNonOfficialEndpoints))
     {
         throw new InvalidOperationException(
-            "QuickBooks Online HTTP BaseUrl must use an official Intuit API host.");
+            "QuickBooks Online HTTP BaseUrl must use an official Intuit API host outside explicit Development testing.");
+    }
+
+    if (!isDevelopment
+        && options.DevelopmentAllowNonOfficialEndpoints)
+    {
+        throw new InvalidOperationException(
+            "QuickBooks Online HTTP DevelopmentAllowNonOfficialEndpoints cannot be enabled outside Development.");
     }
 }
 
