@@ -22,6 +22,7 @@ on:
       - '.github/scripts/verify_document_review.py'
       - '.github/scripts/verify_restart_recovery.sh'
       - '.github/scripts/webhook_receiver.py'
+      - '.github/scripts/fake_quickbooks_server.py'
       - '.github/workflows/automation-e2e.yml'
   workflow_dispatch:
 
@@ -165,6 +166,18 @@ jobs:
           AccountingPosting__QuickBooksOnline__OAuth__ClientSecret: e2e-client-secret
           AccountingPosting__QuickBooksOnline__OAuth__RedirectUri: https://docflow.example/api/accounting-connections/quickbooks-online/callback
           AccountingPosting__QuickBooksOnline__OAuth__DataProtectionKeyRingPath: /tmp/docflow-dp-keys
+          AccountingPosting__QuickBooksOnline__OAuth__TokenUrl: http://127.0.0.1:5100/oauth2/v1/tokens/bearer
+          AccountingPosting__QuickBooksOnline__OAuth__DevelopmentAllowNonOfficialEndpoints: "true"
+          AccountingPosting__QuickBooksOnline__Http__BaseUrl: http://127.0.0.1:5100
+          AccountingPosting__QuickBooksOnline__Http__DevelopmentAllowNonOfficialEndpoints: "true"
+          AccountingPosting__QuickBooksOnline__Targets__0__CustomerId: 11111111-1111-1111-1111-111111111111
+          AccountingPosting__QuickBooksOnline__Targets__0__TargetKey: qbo-sandbox
+          AccountingPosting__QuickBooksOnline__Targets__0__ApAccountId: ap-33
+          AccountingPosting__QuickBooksOnline__Targets__0__DefaultExpenseAccountId: expense-default
+          AccountingPosting__QuickBooksOnline__Targets__0__Vendors__0__SupplierName: ACME Components Ltd.
+          AccountingPosting__QuickBooksOnline__Targets__0__Vendors__0__VendorId: vendor-41
+          AccountingPosting__QuickBooksOnline__Targets__0__TaxCodes__0__Rate: 20
+          AccountingPosting__QuickBooksOnline__Targets__0__TaxCodes__0__TaxCodeId: vat-20
           AccountingPosting__Worker__PollIntervalSeconds: 1
           AccountingPosting__Worker__BatchSize: 10
           AccountingPosting__Worker__InProgressTimeoutSeconds: 1
@@ -192,6 +205,22 @@ jobs:
           Notifications__Webhooks__Tenants__0__Secret: docflow-e2e-webhook-secret-0123456789
         run: |
           set -euo pipefail
+
+          qbo_log=/tmp/docflow-qbo-e2e.jsonl
+          python .github/scripts/fake_quickbooks_server.py --port 5100 --output "$qbo_log" \
+            > /tmp/docflow-qbo-e2e.log 2>&1 &
+          qbo_pid=$!
+
+          qbo_ready=false
+          for _ in $(seq 1 20); do
+            if curl -fsS -o /dev/null http://127.0.0.1:5100/health; then
+              qbo_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$qbo_ready" = "true"
+          mkdir -p /tmp/docflow-dp-keys
 
           webhook_log=/tmp/docflow-webhook-events.jsonl
           DOCFLOW_WEBHOOK_SECRET='docflow-e2e-webhook-secret-0123456789' \
@@ -236,6 +265,7 @@ jobs:
           cleanup() {
             kill "$api_pid" 2>/dev/null || true
             kill "$webhook_pid" 2>/dev/null || true
+            kill "$qbo_pid" 2>/dev/null || true
           }
           trap cleanup EXIT
 
