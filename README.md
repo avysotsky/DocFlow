@@ -117,9 +117,10 @@ POST /api/accounting-connections/quickbooks-online/targets/{targetKey}/authorize
 GET  /api/accounting-connections/quickbooks-online/callback
 GET  /api/accounting-connections/quickbooks-online/targets/{targetKey}
 GET  /api/accounting-connections/quickbooks-online/targets/{targetKey}/references
+GET  /api/accounting-connections/quickbooks-online/targets/{targetKey}/mapping-validation
 ```
 
-The references endpoint performs read-only QBO queries for Vendor, Account and TaxCode objects so real sandbox mapping ids can be selected before Bill posting is enabled.
+The references endpoint performs read-only QBO queries for Vendor, Account and TaxCode objects so real sandbox mapping ids can be selected before Bill posting is enabled. The mapping-validation endpoint checks configured Vendor/AP/Expense/Tax ids against the connected QBO company and should return `isValid=true` before the first sandbox Bill is created.
 
 Sandbox bootstrap is split into two compose overlays:
 
