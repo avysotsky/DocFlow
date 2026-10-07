@@ -2,7 +2,7 @@
 
 ## State
 
-READY_FOR_INTEGRATION
+INTEGRATED
 
 ## Branch
 
@@ -173,7 +173,7 @@ Coverage includes the requested deterministic cases: valid normalization, CRLF/L
 
 ## CI
 
-GitHub `Python Worker CI` run `37602606871` (run number `153`) completed with `success` for validation HEAD `b7aacca99fd49bc72e83d81662f0676caad82912`. The CI job completed Checkout, Python 3.11 setup, editable install, compile, and test steps successfully.
+Exact pre-merge HEAD `a1b543ad4c8f4920c27baf2db7d7251d162bb87d` passed GitHub `Python Worker CI` run `37602859254` (run number `154`). PR #2 was merged into `main` as `3e0cbb0499069667ae04984e0bb5a71d6f366cb5`. Post-merge GitHub `Python Worker CI` run `37603127313` (run number `155`) completed with `success`.
 
 ## Blockers
 
@@ -181,4 +181,4 @@ None.
 
 ## Next integration action
 
-Development Orchestrator may review and integrate PR #2. Do not begin the extraction/LLM/TradeOps-adapter slice from DF-02.
+DF-02 is integrated. Generic text/transcript normalization remains owned by DocFlow. The next cross-repository step must be a separate bounded earnings-research adapter from `NormalizedTextDocument` into TradeOps consumer contracts; do not add TradeOps dependencies to DocFlow.
