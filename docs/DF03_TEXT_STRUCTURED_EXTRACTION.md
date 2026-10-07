@@ -2,7 +2,7 @@
 
 ## State
 
-READY
+READY FOR INTEGRATION
 
 ## Repository / branch
 
@@ -219,3 +219,58 @@ Before handoff, update this file with:
 Stop after this single bounded slice.
 
 Do not merge independently.
+
+
+## Handoff status
+
+### Current HEAD
+
+`c0f4baaf654003ffab0d507900103629e4b2c236`
+
+This is the CI-validated implementation HEAD. The handoff documentation update that records this status is docs-only and follows this implementation commit.
+
+### Changed files
+
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/text_base.py`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/__init__.py`
+- `src/DocFlow.Extraction.Worker/tests/test_text_structured_extraction_engine.py`
+- `docs/DF03_TEXT_STRUCTURED_EXTRACTION.md`
+
+### Public/shared contracts
+
+Changed additively: `TextStructuredExtractionEngine` is a new exported engine contract with `NormalizedTextDocument -> StructuredExtractionResult` semantics.
+
+No existing public/shared contract was modified. In particular, `StructuredExtractionEngine`, `StructuredExtractionResult`, `DocumentContent`, DF-02 text models, canonical IDs/fingerprint semantics, `TextDocumentNormalizer`, and the deterministic supplier-quotation engine remain unchanged.
+
+### Tests
+
+GitHub `Python Worker CI` executed:
+
+- `python -m compileall -q docflow_worker main.py` — passed;
+- `pytest -q` — `39 passed in 0.23s`.
+
+The suite includes DF-02 normalization regressions, deterministic supplier-quotation regressions, existing PDF/storage/validator regressions, and four DF-03 boundary tests covering exact normalized-document identity, fingerprint, ordered segments, participant associations, deterministic engine name, existing result type reuse, no clock/network dependency at the boundary, and unchanged PDF engine signature.
+
+### CI
+
+Exact CI-validated implementation HEAD:
+
+`c0f4baaf654003ffab0d507900103629e4b2c236`
+
+GitHub Actions:
+
+`Python Worker CI` run `37605791272` (run number `156`) — `success`.
+
+Draft integration PR: #3.
+
+### Privacy scan
+
+Changed code/tests use only synthetic generic values such as `sample`, `Sample Company`, `Speaker A`, and `Speaker B`. No personal client or prospective-client names were introduced.
+
+### Blockers
+
+None.
+
+### Next integration action
+
+Development Orchestrator should review DF-03 / draft PR #3 and integrate the bounded slice into `main` if accepted. No further DF-03 feature work should be added on this worker branch before integration review.
