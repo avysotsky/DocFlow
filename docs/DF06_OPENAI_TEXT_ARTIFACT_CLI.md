@@ -2,7 +2,7 @@
 
 ## State
 
-READY
+READY_FOR_INTEGRATION
 
 ## Repository / branch
 
@@ -297,3 +297,152 @@ Before handoff update this file with:
 Stop after this bounded slice.
 
 Do not merge independently.
+
+
+## Handoff status
+
+### Live state verified before implementation
+
+```text
+main: 0fc59b75f53344c802a620b033c409334e145fd9
+initial branch HEAD: 500754e7bb92a2a83c51b82dd45675cc5b68b035
+initial compare: ahead 1 / behind 0
+initial branch CI: no workflow run on the specification-only HEAD
+production baseline Python Worker CI: 37615744590 — SUCCESS
+```
+
+The branch had not advanced beyond the supplied initial HEAD before implementation began.
+
+### CI-validated implementation HEAD
+
+`4991dda534bf7b98caf2ec19d437fab07e3d6645`
+
+This handoff documentation update is docs-only and follows that CI-validated implementation HEAD. The final docs-only commit SHA is reported by the worker handoff because a Git commit cannot contain its own SHA.
+
+### Changed files
+
+- `docs/DF06_OPENAI_TEXT_ARTIFACT_CLI.md`
+- `src/DocFlow.Extraction.Worker/docflow_worker/text_artifact_pipeline.py`
+- `src/DocFlow.Extraction.Worker/text_artifact_main.py`
+- `src/DocFlow.Extraction.Worker/tests/test_text_artifact_cli.py`
+
+The legacy PDF-oriented `src/DocFlow.Extraction.Worker/main.py` is not changed.
+
+No dependency or workflow file is changed.
+
+### Public/shared contracts
+
+Existing DF-02/DF-03/DF-04/DF-05 contracts are reused unchanged:
+
+- `RawTextDocumentInput`
+- `TextDocumentNormalizer`
+- `NormalizedTextDocument`
+- `SchemaDrivenTextExtractionRequest`
+- `SchemaDrivenTextExtractionBackend`
+- `OpenAiSchemaDrivenTextExtractionBackend`
+- `SchemaDrivenTextExtractionEngine`
+- `StructuredExtractionResult`
+
+DF-06 adds only a bounded runnable orchestration surface:
+
+- `BackendFactory` for network-free dependency injection;
+- `TextArtifactPipelineResult` for in-process orchestration status;
+- `run_text_artifact_pipeline(...)`;
+- standalone `text_artifact_main.py`.
+
+The CLI does not call the provider SDK directly and does not add a second JSON Schema validator.
+
+### CLI
+
+```text
+python text_artifact_main.py \
+  --input-raw-json <path> \
+  --schema-request <path> \
+  --model <model> \
+  --output-normalized-json <path> \
+  --output-structured-json <path> \
+  [--document-name <name>]
+```
+
+`--model` is required and has no default.
+
+Behavior:
+
+- raw JSON is parsed by `RawTextDocumentInput`;
+- normalization is performed only by `TextDocumentNormalizer`;
+- the canonical `NormalizedTextDocument` JSON artifact is written immediately after successful normalization;
+- the caller schema request is parsed by `SchemaDrivenTextExtractionRequest`;
+- production composition constructs `OpenAiSchemaDrivenTextExtractionBackend(model)`;
+- extraction is performed by the existing `SchemaDrivenTextExtractionEngine`;
+- the existing `StructuredExtractionResult` is written without a custom envelope;
+- a schema-invalid structured result is still written and returns exit code 2;
+- provider/configuration/file/parsing failures return non-zero;
+- console output is bounded to IDs/count/status/engine/artifact paths or an error type.
+
+### Tests
+
+All automated tests are network-free and use an injected deterministic fake backend/factory.
+
+DF-06 coverage includes:
+
+- existing raw model parsing;
+- existing normalizer use;
+- normalized artifact round-trip through `NormalizedTextDocument`;
+- exact document ID, fingerprint, and segment ID preservation;
+- existing schema-request parsing;
+- invalid schema rejection before backend factory/provider invocation;
+- required model and unknown-argument failure;
+- the same normalized object instance reaching the backend through the existing engine;
+- unchanged `document_name` forwarding;
+- valid structured artifact round-trip;
+- backend data/confidence/validation preservation;
+- schema-invalid artifact write plus non-zero exit;
+- provider exception and missing-file non-zero behavior;
+- output-directory creation;
+- bounded console output with no transcript/secret echo;
+- no direct provider SDK use in the DF-06 CLI/pipeline;
+- separation from the legacy PDF CLI;
+- DF-02/DF-03/DF-04/DF-05 regressions through the full worker suite.
+
+Final CI-validated suite:
+
+```text
+86 passed in 1.04s
+```
+
+### Exact CI
+
+GitHub `Python Worker CI`:
+
+```text
+run: 37620518654
+event: pull_request
+PR: #6 (draft, CI harness only)
+HEAD: 4991dda534bf7b98caf2ec19d437fab07e3d6645
+conclusion: SUCCESS
+tests: 86 passed
+```
+
+Earlier red runs were limited to DF-06 test-harness defects; the final CI above is the authoritative implementation result.
+
+### Optional real-provider smoke
+
+Not run.
+
+The optional real-provider smoke remains explicit opt-in only and is not part of CI.
+
+### Privacy scan
+
+PASS.
+
+All changed implementation/test content uses synthetic generic data. No credentials, client/proprietary transcript content, or real-person test data are introduced. Console failure handling emits only the exception type and artifact paths rather than exception messages or payloads.
+
+### Blockers
+
+None.
+
+### Next integration action
+
+Development Orchestrator should review the bounded diff and draft PR #6, then integrate `DocFlow/df06-openai-text-artifact-cli` into `main` if accepted and verify the post-merge `Python Worker CI`.
+
+This worker does not merge the branch independently.
