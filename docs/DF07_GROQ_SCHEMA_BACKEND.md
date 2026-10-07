@@ -2,7 +2,7 @@
 
 ## State
 
-IMPLEMENTED — READY FOR INTEGRATION
+INTEGRATED
 
 ## Repository / branch
 
@@ -619,3 +619,37 @@ None.
 Orchestrator may review and merge draft PR #7 / branch `DocFlow/df07-groq-schema-backend` into `main`, then verify post-merge `Python Worker CI`.
 
 Do not merge independently from this worker.
+
+
+## Integration record
+
+Integrated by Development Orchestrator:
+
+```text
+final PR HEAD: 0dad44921bffeb5f7599daf4ea106270da584c24
+final exact-head CI: 37639935357 — SUCCESS
+tests: 116 / 116 passed
+PR: #7
+merge commit: 211f890625712a161eadad09e56962ad69a759f5
+post-merge CI: 37640516860 — SUCCESS
+```
+
+Architecture/privacy/secret review passed.
+
+The integrated DocFlow text artifact CLI contract is:
+
+```text
+--provider openai|groq
+default provider = openai
+model = explicit / required
+```
+
+Groq credentials remain environment-only through `GROQ_API_KEY`.
+
+Real Groq smoke remains:
+
+```text
+NOT RUN — local operator credential/model required
+```
+
+The next validation action is a local operator smoke using the integrated TradeOps VS-12 harness and this integrated DocFlow main.
