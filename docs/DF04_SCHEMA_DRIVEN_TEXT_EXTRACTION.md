@@ -2,7 +2,7 @@
 
 ## State
 
-READY
+HANDOFF_READY
 
 ## Repository / branch
 
@@ -476,3 +476,97 @@ NormalizedTextDocument
 ```
 
 That runnable integration belongs outside DF-04.
+
+
+## Handoff status
+
+### Current HEAD
+
+CI-validated implementation HEAD:
+
+`8e4db9f0e9dc2a0dec75cf09a4bcfac74d119d06`
+
+The handoff documentation update is docs-only and follows that implementation HEAD.
+
+### Changed files
+
+- `docs/DF04_SCHEMA_DRIVEN_TEXT_EXTRACTION.md`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/__init__.py`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/schema_driven_text.py`
+- `src/DocFlow.Extraction.Worker/pyproject.toml`
+- `src/DocFlow.Extraction.Worker/tests/test_schema_driven_text_extraction_engine.py`
+
+### Public/shared contracts
+
+Changed additively:
+
+- `SchemaDrivenTextExtractionRequest`
+- `SchemaDrivenTextExtractionBackend`
+- `SchemaDrivenTextExtractionBackendResult`
+- `SchemaDrivenTextExtractionEngine`
+
+The existing `TextStructuredExtractionEngine`, `StructuredExtractionEngine`,
+`StructuredExtractionResult`, `StructuredValidationResult`,
+`ValidationCheckResult`, `NormalizedTextDocument`, DF-02 identity/fingerprint
+semantics, PDF extraction contracts, and deterministic supplier-quotation
+contracts were not modified.
+
+### Dependency changes
+
+Added one bounded runtime dependency:
+
+`jsonschema>=4`
+
+No provider SDK, HTTP client, provider retry/configuration dependency, model
+client, or domain-specific dependency was added.
+
+### Tests
+
+GitHub `Python Worker CI` executed:
+
+- `python -m compileall -q docflow_worker main.py` — passed;
+- `pytest -q` — `55 passed in 0.59s`.
+
+The DF-04 tests cover request/schema validation, fail-closed unknown members,
+backend confidence bounds, exact normalized-document and request propagation,
+unchanged document identity/fingerprint/segments, document-name propagation,
+existing result/validation contract reuse, deterministic engine identity,
+valid/invalid schema outcomes, deterministic error details,
+`additionalProperties: false`, required fields, strict type validation without
+coercion, backend exception propagation, and absence of production
+provider/network-client imports.
+
+The full suite also covers the existing DF-02 normalization, DF-03 text
+structured-extraction boundary, PDF/storage, deterministic supplier-quotation,
+and supplier-quotation validation regressions.
+
+### CI
+
+Exact CI-validated implementation HEAD:
+
+`8e4db9f0e9dc2a0dec75cf09a4bcfac74d119d06`
+
+GitHub Actions:
+
+`Python Worker CI` run `37611399701` (run number `160`) — `success`.
+
+Draft integration PR: #4.
+
+### Privacy scan
+
+All five changed files were scanned against the orchestration privacy rule.
+Only generic synthetic values are used in implementation/tests; no prohibited
+personal client or prospective-client names were introduced. Commit messages
+and the draft PR title/body are also generic.
+
+### Blockers
+
+None.
+
+### Next integration action
+
+Development Orchestrator should review draft PR #4 and, if accepted, integrate
+DF-04 into `main`.
+
+Do not start a provider-specific backend or cross-repository runnable slice from
+this worker chat. Those belong to a separately orchestrated follow-up slice.
