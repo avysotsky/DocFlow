@@ -1,0 +1,65 @@
+{
+  "title": "Sample quarterly business call",
+  "document_type": "transcript",
+  "source": {
+    "provider": "sample-provider",
+    "source_uri": "https://example.invalid/documents/sample-quarterly-call",
+    "source_document_id": "sample-call-2026-q3",
+    "source_timestamp": "2026-09-30T14:00:00Z",
+    "published_at": "2026-09-30T15:00:00Z",
+    "retrieved_at": "2026-10-01T08:30:00Z"
+  },
+  "participants": [
+    {
+      "participant_id": "moderator-1",
+      "display_name": "Moderator",
+      "role": "moderator",
+      "organization": "Sample Company"
+    },
+    {
+      "participant_id": "speaker-a",
+      "display_name": "Speaker A",
+      "role": "speaker",
+      "organization": "Sample Company"
+    },
+    {
+      "participant_id": "speaker-b",
+      "display_name": "Speaker B",
+      "role": "speaker",
+      "organization": "Sample Company"
+    },
+    {
+      "participant_id": "questioner-1",
+      "display_name": "Questioner",
+      "role": "analyst",
+      "organization": "Example Research"
+    }
+  ],
+  "segments": [
+    {
+      "sequence": 1,
+      "participant_id": "moderator-1",
+      "text": "Welcome to the sample quarterly business call."
+    },
+    {
+      "sequence": 2,
+      "participant_id": "speaker-a",
+      "text": "We completed the planned service rollout this quarter."
+    },
+    {
+      "sequence": 3,
+      "participant_id": null,
+      "text": "A short pause follows before questions begin."
+    },
+    {
+      "sequence": 4,
+      "participant_id": "questioner-1",
+      "text": "How did customers respond to the rollout?"
+    },
+    {
+      "sequence": 5,
+      "participant_id": "speaker-b",
+      "text": "Feedback was constructive and adoption increased steadily."
+    }
+  ]
+}
