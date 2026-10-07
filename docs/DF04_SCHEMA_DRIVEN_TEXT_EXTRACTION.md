@@ -2,7 +2,7 @@
 
 ## State
 
-HANDOFF_READY
+INTEGRATED
 
 ## Repository / branch
 
@@ -563,10 +563,18 @@ and the draft PR title/body are also generic.
 
 None.
 
-### Next integration action
+### Integration result
 
-Development Orchestrator should review draft PR #4 and, if accepted, integrate
-DF-04 into `main`.
+DF-04 was accepted and integrated.
 
-Do not start a provider-specific backend or cross-repository runnable slice from
-this worker chat. Those belong to a separately orchestrated follow-up slice.
+```text
+final PR head: 51c09a3dfe5af0533b0a6efdd40a6c939d815432
+exact-head CI: 37611510368 — SUCCESS
+PR: #4
+merge commit: 9b31914a0433b53fe08bb80445fba52bf62dcf50
+post-merge CI: 37612364691 — SUCCESS
+```
+
+Architecture and privacy review passed. Existing DF-02/DF-03/PDF/shared extraction contracts remained compatible. The only dependency addition is `jsonschema>=4`.
+
+Next orchestration step: define a runnable cross-repository transcript-to-research slice and separately decide whether to launch a provider-specific backend worker against the now-integrated DF-04 protocol.
