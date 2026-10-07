@@ -2,7 +2,7 @@
 
 ## State
 
-READY_FOR_INTEGRATION
+INTEGRATED
 
 ## Repository / branch
 
@@ -441,8 +441,21 @@ All changed implementation/test content uses synthetic generic data. No credenti
 
 None.
 
-### Next integration action
+### Integration result
 
-Development Orchestrator should review the bounded diff and draft PR #6, then integrate `DocFlow/df06-openai-text-artifact-cli` into `main` if accepted and verify the post-merge `Python Worker CI`.
+DF-06 was accepted and integrated.
 
-This worker does not merge the branch independently.
+```text
+final PR head: 9b7b895a730b5666ef75a4763fade1e4a55f5cf5
+exact final-head CI: 37620734092 — SUCCESS
+PR: #6
+merge commit: 1c1df1b63257a40cec8a645dd8a649f1a08187a4
+post-merge CI: 37621390275 — SUCCESS
+tests: 86 passed
+```
+
+Architecture/privacy/secret review passed. The legacy PDF CLI remained unchanged. The integrated runnable producer reuses DF-02 normalization, DF-04 schema validation, and DF-05 provider backend contracts without adding a domain dependency.
+
+The optional real-provider smoke was not run.
+
+Next orchestration step: integrate the independent VS-09 TradeOps-owned provider-compatible earnings schema/input slice, then execute a two-repository provider-backed transcript research demo across the serialized JSON artifact boundary.
