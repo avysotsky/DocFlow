@@ -235,8 +235,21 @@ def test_backend_result_rejects_confidence_outside_unit_interval(
 
 def test_valid_backend_data_preserves_input_request_output_and_confidence() -> None:
     backend_data = {"category": "sample", "score": 0.75}
-    result, backend, request, document = _run(backend_data, confidence=0.83)
+    backend = _InMemoryBackend(
+        SchemaDrivenTextExtractionBackendResult(
+            data=backend_data,
+            confidence=0.83,
+        )
+    )
+    request = _request()
+    document = _normalized_document()
     serialized_before = document.model_dump_json()
+    document_id_before = document.document_id
+    fingerprint_before = document.fingerprint
+    segment_ids_before = [segment.segment_id for segment in document.segments]
+    engine = SchemaDrivenTextExtractionEngine(backend, request)
+
+    result = asyncio.run(engine.extract(document, document_name="sample.txt"))
 
     assert backend.calls == 1
     assert backend.received_content is document
@@ -256,8 +269,9 @@ def test_valid_backend_data_preserves_input_request_output_and_confidence() -> N
     assert result.validation.confidence == 1.0
 
     assert document.model_dump_json() == serialized_before
-    assert backend.received_content.document_id == document.document_id
-    assert backend.received_content.fingerprint == document.fingerprint
+    assert document.document_id == document_id_before
+    assert document.fingerprint == fingerprint_before
+    assert [segment.segment_id for segment in document.segments] == segment_ids_before
     assert backend.received_content.segments is document.segments
     assert backend.received_content.participants is document.participants
 
