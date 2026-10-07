@@ -454,7 +454,7 @@ def test_legacy_pdf_main_is_byte_for_byte_unchanged() -> None:
     main_path = Path(__file__).resolve().parents[1] / "main.py"
     data = main_path.read_bytes()
     git_blob = hashlib.sha1(
-        f"blob {len(data)}\\0".encode("ascii") + data
+        f"blob {len(data)}".encode("ascii") + b"\\x00" + data
     ).hexdigest()
 
     assert git_blob == "1462cd4eb707e2cc0c36654644f91f5d8d5af24a"
