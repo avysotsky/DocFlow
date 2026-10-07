@@ -1,13 +1,28 @@
 import ast
 import hashlib
+import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 import docflow_worker.text_artifact_pipeline as pipeline_module
-import text_artifact_main as cli_module
+
+
+def _load_cli_module():
+    path = Path(__file__).resolve().parents[1] / "text_artifact_main.py"
+    spec = importlib.util.spec_from_file_location("df06_text_artifact_main", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+cli_module = _load_cli_module()
 from docflow_worker.engines import (
     SchemaDrivenTextExtractionBackend,
     SchemaDrivenTextExtractionBackendResult,
