@@ -2,7 +2,7 @@
 
 ## State
 
-READY
+IMPLEMENTED — READY FOR INTEGRATION
 
 ## Repository / branch
 
@@ -401,3 +401,221 @@ Before handoff update this file with:
 Stop after this bounded slice.
 
 Do not merge independently.
+
+
+## Handoff status
+
+### Live state verified before implementation
+
+```text
+main: 88d0bf7d0ff20208c2992fa43bac1f32414e0b8d
+initial branch HEAD: c90e5960cc86c737e3f878ef8eaa1715b76ea8f0
+initial compare: ahead 1 / behind 0
+initial branch CI: no pull-request workflow run/status on specification-only HEAD
+production baseline Python Worker CI: 37621390275 — SUCCESS
+```
+
+The branch had not advanced beyond the supplied initial HEAD before implementation began.
+
+Official Groq documentation was rechecked on 2026-10-07 before implementation. The validated provider contract is:
+
+- OpenAI-compatible base URL: `https://api.groq.com/openai/v1`;
+- strict Structured Outputs through Chat Completions using `response_format.type = json_schema`;
+- `response_format.json_schema.strict = true`;
+- Groq Responses API remains beta and lists `store` as unsupported.
+
+### CI-validated implementation HEAD
+
+`171830b97174e55824de280eef280daa8f7b8b96`
+
+This handoff documentation update is docs-only and follows that CI-validated implementation HEAD. The final docs-only commit SHA is reported by the worker handoff because a Git commit cannot contain its own SHA.
+
+### Changed files
+
+- `docs/DF07_GROQ_SCHEMA_BACKEND.md`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/groq_schema_driven_text.py`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/__init__.py`
+- `src/DocFlow.Extraction.Worker/text_artifact_main.py`
+- `src/DocFlow.Extraction.Worker/tests/test_groq_schema_driven_text_backend.py`
+- `src/DocFlow.Extraction.Worker/tests/test_text_artifact_cli.py`
+
+Unchanged by DF-07:
+
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/schema_driven_text.py`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/openai_schema_driven_text.py`
+- `src/DocFlow.Extraction.Worker/docflow_worker/text_artifact_pipeline.py`
+- legacy PDF `src/DocFlow.Extraction.Worker/main.py`
+- package dependencies and CI workflow.
+
+### Public/shared contracts
+
+DF-07 adds and exports:
+
+```python
+GroqSchemaDrivenTextExtractionBackend
+GroqSchemaDrivenTextExtractionError
+```
+
+The backend implements the existing DF-04:
+
+```python
+SchemaDrivenTextExtractionBackend
+```
+
+No DF-04 request/result/validation contract changed. The provider returns:
+
+```python
+SchemaDrivenTextExtractionBackendResult(
+    data=<parsed JSON object>,
+    confidence=None,
+)
+```
+
+and existing `SchemaDrivenTextExtractionEngine` remains the authoritative JSON Schema validator.
+
+Backend identity:
+
+```text
+groq_chat_completions_v1:<explicit-model>
+```
+
+No production model allowlist or default model was added.
+
+### Provider request semantics
+
+Production client construction is bounded to:
+
+```python
+AsyncOpenAI(
+    api_key=<GROQ_API_KEY from environment>,
+    base_url="https://api.groq.com/openai/v1",
+)
+```
+
+`GROQ_API_KEY` is required only when the default client is constructed. Missing or blank credentials fail closed before any provider request. Injected clients require no environment credential.
+
+The backend makes exactly:
+
+```python
+await client.chat.completions.create(...)
+```
+
+with:
+
+- explicit model;
+- exactly one generic system message;
+- exactly one user message containing the complete deterministic serialized `NormalizedTextDocument`;
+- `response_format.type = "json_schema"`;
+- schema name `docflow_schema`;
+- `strict = True`;
+- the caller-owned `request.json_schema` passed unchanged.
+
+It does not add tools, tool choice, web search, MCP, retries, streaming, temperature tuning, reasoning controls, provider metadata, or storage fields.
+
+Response handling requires a choice, assistant content, valid JSON, and a JSON-object root. Provider exceptions are converted to bounded `GroqSchemaDrivenTextExtractionError` messages without raw provider details, transcript text, or credentials.
+
+### CLI semantics
+
+`text_artifact_main.py` now accepts:
+
+```text
+--provider openai|groq
+```
+
+Default remains:
+
+```text
+openai
+```
+
+Therefore the existing DF-06 command without `--provider` preserves the OpenAI composition path.
+
+Groq production composition uses:
+
+```text
+--provider groq --model <explicit-model>
+```
+
+There is no `--api-key` option. The existing injected `backend_factory: Callable[[str], SchemaDrivenTextExtractionBackend]` contract is preserved and remains provider/credential independent for tests. The generic pipeline is unchanged.
+
+### Tests
+
+DF-07 adds Groq backend coverage for:
+
+- DF-04 abstraction compatibility and explicit normalized model identity;
+- exact Groq base URL and `GROQ_API_KEY` environment lookup;
+- missing/blank credential fail-closed behavior;
+- injected-client credential independence;
+- exact Chat Completions call surface;
+- two-message generic prompt contract;
+- deterministic complete normalized-document serialization;
+- strict JSON Schema response format;
+- unchanged caller schema object;
+- absence of tools/web/MCP/retries/streaming/tuning/provider metadata;
+- successful JSON-object parsing and null confidence;
+- empty, invalid, non-object, missing-choice, and missing-message rejection;
+- sanitized provider exception handling;
+- DF-04 remaining the authoritative schema validator;
+- absence of domain logic, clock/random/logging side effects.
+
+CLI coverage additionally verifies:
+
+- default provider is OpenAI;
+- explicit `--provider openai` and `--provider groq`;
+- unknown provider rejection;
+- model required for both providers;
+- no API-key CLI option;
+- injected backend factory remains provider/credential independent;
+- existing artifact/validation/error/privacy behavior remains intact;
+- legacy PDF CLI remains separate.
+
+Final CI-validated full worker suite:
+
+```text
+116 passed in 0.83s
+```
+
+### Exact CI
+
+Draft PR used only as CI harness:
+
+```text
+PR: #7
+event: pull_request
+workflow: Python Worker CI
+run: 37639653424
+run number: 172
+job: test (112854907390)
+HEAD: 171830b97174e55824de280eef280daa8f7b8b96
+conclusion: SUCCESS
+compile: SUCCESS
+tests: 116 passed in 0.83s
+```
+
+The PR remains draft and must not be merged independently by this worker.
+
+### Real Groq smoke
+
+```text
+real Groq smoke: NOT RUN — local operator credential/model required
+```
+
+The worker execution environment did not contain a non-blank `GROQ_API_KEY`. This is not a CI or integration blocker.
+
+### Privacy / secret scan
+
+PASS.
+
+All changed implementation/test data is generic synthetic data. Secret-pattern scan found no private-key material, bearer credential, cloud access key, or real provider credential. Credential-looking values in tests are explicitly synthetic fixtures only.
+
+Production code never logs or serializes the Groq key, raw provider exception message, or normalized transcript text into an exception. CLI failure output remains bounded to exception type and artifact paths.
+
+### Blockers
+
+None.
+
+### Next integration action
+
+Orchestrator may review and merge draft PR #7 / branch `DocFlow/df07-groq-schema-backend` into `main`, then verify post-merge `Python Worker CI`.
+
+Do not merge independently from this worker.
