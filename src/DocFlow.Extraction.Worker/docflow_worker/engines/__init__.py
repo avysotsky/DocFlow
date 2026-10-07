@@ -1,5 +1,9 @@
 from .base import StructuredExtractionEngine
 from .deterministic_supplier_quotation import DeterministicSupplierQuotationEngine
+from .openai_schema_driven_text import (
+    OpenAiSchemaDrivenTextExtractionBackend,
+    OpenAiSchemaDrivenTextExtractionError,
+)
 from .schema_driven_text import (
     SchemaDrivenTextExtractionBackend,
     SchemaDrivenTextExtractionBackendResult,
@@ -10,6 +14,8 @@ from .text_base import TextStructuredExtractionEngine
 
 __all__ = [
     "DeterministicSupplierQuotationEngine",
+    "OpenAiSchemaDrivenTextExtractionBackend",
+    "OpenAiSchemaDrivenTextExtractionError",
     "SchemaDrivenTextExtractionBackend",
     "SchemaDrivenTextExtractionBackendResult",
     "SchemaDrivenTextExtractionEngine",
