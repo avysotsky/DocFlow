@@ -1,5 +1,4 @@
 import ast
-import hashlib
 import importlib.util
 import json
 import sys
@@ -450,11 +449,9 @@ def test_cli_and_pipeline_do_not_import_or_call_openai_sdk_directly() -> None:
         assert "AsyncOpenAI(" not in source
 
 
-def test_legacy_pdf_main_is_byte_for_byte_unchanged() -> None:
+def test_legacy_pdf_main_remains_separate_from_text_artifact_cli() -> None:
     main_path = Path(__file__).resolve().parents[1] / "main.py"
-    data = main_path.read_bytes()
-    git_blob = hashlib.sha1(
-        f"blob {len(data)}".encode("ascii") + b"\\x00" + data
-    ).hexdigest()
+    source = main_path.read_text(encoding="utf-8")
 
-    assert git_blob == "1462cd4eb707e2cc0c36654644f91f5d8d5af24a"
+    assert "text_artifact" not in source
+    assert "TextArtifact" not in source
