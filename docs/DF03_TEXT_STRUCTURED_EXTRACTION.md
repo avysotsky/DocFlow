@@ -2,7 +2,7 @@
 
 ## State
 
-READY FOR INTEGRATION
+INTEGRATED
 
 ## Repository / branch
 
@@ -271,6 +271,26 @@ Changed code/tests use only synthetic generic values such as `sample`, `Sample C
 
 None.
 
-### Next integration action
+### Integration result
 
-Development Orchestrator should review DF-03 / draft PR #3 and integrate the bounded slice into `main` if accepted. No further DF-03 feature work should be added on this worker branch before integration review.
+DF-03 was accepted and integrated.
+
+```text
+final PR head: 2d3d946afaf61ad0eae8c251692d3712834bd31a
+exact-head CI: 37605915999 — SUCCESS
+PR: #3
+merge commit: a2a947767801420f2900790b81501104dda0be5c
+post-merge CI: 37607059797 — SUCCESS
+```
+
+The integrated boundary is:
+
+```text
+NormalizedTextDocument
+-> TextStructuredExtractionEngine
+-> StructuredExtractionResult
+```
+
+Existing PDF extraction contracts and DF-02 identity/fingerprint semantics remain unchanged.
+
+Next cross-repository step: define a separate structured earnings-fact extraction slice on top of the now-integrated generic DocFlow text extraction boundary and the integrated TradeOps VS-06 consumer adapter.
