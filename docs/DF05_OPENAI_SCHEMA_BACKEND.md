@@ -360,3 +360,115 @@ Before handoff update this file with:
 Stop after this bounded slice.
 
 Do not merge independently.
+
+
+## Handoff status
+
+### CI-validated implementation HEAD
+
+`e89b175bb6e453108fe8903e87ab31b5ec1dfeb2`
+
+This handoff documentation update is docs-only and follows that implementation HEAD.
+
+### Changed files
+
+- `docs/DF05_OPENAI_SCHEMA_BACKEND.md`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/__init__.py`
+- `src/DocFlow.Extraction.Worker/docflow_worker/engines/openai_schema_driven_text.py`
+- `src/DocFlow.Extraction.Worker/pyproject.toml`
+- `src/DocFlow.Extraction.Worker/tests/test_openai_schema_driven_text_backend.py`
+
+### Dependency
+
+Added the bounded official SDK dependency:
+
+```text
+openai>=3.26.0,<4
+```
+
+The exact CI install resolved `openai 3.26.0`.
+
+### API surface
+
+Added:
+
+- `OpenAiSchemaDrivenTextExtractionBackend`
+- `OpenAiSchemaDrivenTextExtractionError`
+
+The backend:
+
+- requires an explicit model and exposes deterministic name `openai_responses_v1:<model>`;
+- supports an injected async client for network-free tests;
+- otherwise constructs the official `AsyncOpenAI` client with standard SDK configuration;
+- uses `responses.create`;
+- sends the caller schema unchanged through strict `text.format` JSON Schema Structured Outputs;
+- uses provider-local response-format name `docflow_schema`;
+- sends `store=False`;
+- enables no tools and no conversation persistence;
+- serializes the complete `NormalizedTextDocument` deterministically;
+- accepts only a completed response with non-empty JSON-object output;
+- returns `SchemaDrivenTextExtractionBackendResult(data=..., confidence=None)`;
+- leaves final JSON Schema validation exclusively to the existing DF-04 engine.
+
+No DF-04 public signatures were changed.
+
+### OpenAI API verification
+
+Before implementation, the current official API documentation and official Python SDK were checked. The current Responses API supports Structured Outputs via `text.format` with `type="json_schema"`, `strict=True`, and caller-supplied `schema`; `store=False` is supported. The current official Python package release is `3.26.0`.
+
+### Tests
+
+All automated tests are network-free and use an injected fake async client.
+
+Coverage includes:
+
+- backend abstraction implementation;
+- explicit/normalized model and deterministic backend name;
+- standard no-argument official SDK client construction when no client is injected;
+- exact caller schema object sent unchanged;
+- strict Structured Outputs and deterministic provider-local format name;
+- `store=False`, no tools, no conversation/persistence metadata;
+- deterministic complete normalized-document serialization with exact IDs and fingerprint;
+- input immutability;
+- successful JSON object parsing and JSON value preservation;
+- `confidence=None`;
+- empty, invalid JSON, and non-object output rejection;
+- failed, incomplete, and cancelled response rejection;
+- provider exception wrapping without input/raw-provider dump;
+- backend intentionally not performing schema validation;
+- existing DF-04 engine performing final deterministic validation;
+- absence of domain-specific production logic, clock/random dependencies, and logging;
+- DF-02/DF-03/DF-04 and existing worker regressions through the full suite.
+
+GitHub `Python Worker CI`:
+
+```text
+run: 37614034193
+run number: 163
+conclusion: SUCCESS
+implementation HEAD: e89b175bb6e453108fe8903e87ab31b5ec1dfeb2
+python -m compileall -q docflow_worker main.py — passed
+pytest -q — 73 passed in 0.87s
+```
+
+Draft integration PR: #5.
+
+### Optional manual smoke
+
+Not run.
+
+The optional real-provider smoke is not required for this bounded slice and remains explicitly opt-in. CI does not require `OPENAI_API_KEY` and made no provider network calls.
+
+### Privacy scan
+
+All five changed files were scanned before handoff. The scan passed: only generic synthetic fixture values are present and no committed secret was found.
+
+### Blockers
+
+None.
+
+### Next integration action
+
+Development Orchestrator should review draft PR #5 and, if accepted, integrate DF-05 into `main`.
+
+Do not merge from this worker chat and do not start a subsequent slice here.
