@@ -2,7 +2,7 @@
 
 ## State
 
-VALIDATING
+READY_FOR_INTEGRATION
 
 ## Branch
 
@@ -173,12 +173,12 @@ Coverage includes the requested deterministic cases: valid normalization, CRLF/L
 
 ## CI
 
-GitHub `Python Worker CI` is configured for pull requests to `main` when worker files change. Remote CI is pending the DF-02 pull request at this state.
+GitHub `Python Worker CI` run `37602606871` (run number `153`) completed with `success` for validation HEAD `b7aacca99fd49bc72e83d81662f0676caad82912`. The CI job completed Checkout, Python 3.11 setup, editable install, compile, and test steps successfully.
 
 ## Blockers
 
-None in the implementation. Remote CI must be green before final state changes to `READY_FOR_INTEGRATION`.
+None.
 
 ## Next integration action
 
-Open/validate the DF-02 pull request against `main`. After GitHub Python Worker CI succeeds, record the exact CI run, change this document state to `READY_FOR_INTEGRATION`, and hand the exact branch HEAD to the Development Orchestrator.
+Development Orchestrator may review and integrate PR #2. Do not begin the extraction/LLM/TradeOps-adapter slice from DF-02.
