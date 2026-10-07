@@ -147,6 +147,7 @@ def _run_cli(
     factory: _Factory,
     *,
     document_name: str | None = "synthetic.txt",
+    provider: str | None = None,
 ) -> tuple[int, Path, Path]:
     raw_path, schema_path = _write_inputs(tmp_path)
     normalized_path = tmp_path / "artifacts" / "normalized.json"
@@ -163,6 +164,8 @@ def _run_cli(
         "--output-structured-json",
         str(structured_path),
     ]
+    if provider is not None:
+        argv[0:0] = ["--provider", provider]
     if document_name is not None:
         argv.extend(["--document-name", document_name])
 
@@ -455,3 +458,115 @@ def test_legacy_pdf_main_remains_separate_from_text_artifact_cli() -> None:
 
     assert "text_artifact" not in source
     assert "TextArtifact" not in source
+
+
+
+def _parser_common_args() -> list[str]:
+    return [
+        "--input-raw-json",
+        "raw.json",
+        "--schema-request",
+        "schema.json",
+        "--output-normalized-json",
+        "normalized.json",
+        "--output-structured-json",
+        "structured.json",
+    ]
+
+
+def test_provider_defaults_to_openai_and_explicit_values_parse() -> None:
+    parser = cli_module.build_parser()
+    common = _parser_common_args()
+
+    default_args = parser.parse_args(common + ["--model", "model-test"])
+    openai_args = parser.parse_args(
+        ["--provider", "openai"] + common + ["--model", "model-test"]
+    )
+    groq_args = parser.parse_args(
+        ["--provider", "groq"] + common + ["--model", "model-test"]
+    )
+
+    assert default_args.provider == "openai"
+    assert openai_args.provider == "openai"
+    assert groq_args.provider == "groq"
+
+
+@pytest.mark.parametrize("provider", ["openai", "groq"])
+def test_model_remains_required_for_every_provider(provider: str) -> None:
+    parser = cli_module.build_parser()
+
+    with pytest.raises(SystemExit) as missing_model:
+        parser.parse_args(["--provider", provider] + _parser_common_args())
+
+    assert missing_model.value.code == 2
+
+
+def test_unknown_provider_and_api_key_option_are_rejected() -> None:
+    parser = cli_module.build_parser()
+    common = _parser_common_args() + ["--model", "model-test"]
+
+    with pytest.raises(SystemExit) as unknown_provider:
+        parser.parse_args(["--provider", "unknown"] + common)
+    assert unknown_provider.value.code == 2
+
+    with pytest.raises(SystemExit) as api_key:
+        parser.parse_args(common + ["--api-key", "synthetic-secret"])
+    assert api_key.value.code == 2
+
+
+@pytest.mark.parametrize("provider", [None, "openai", "groq"])
+def test_default_cli_composition_selects_requested_provider(
+    tmp_path: Path,
+    monkeypatch,
+    provider: str | None,
+) -> None:
+    raw_path, schema_path = _write_inputs(tmp_path)
+    normalized_path = tmp_path / "normalized.json"
+    structured_path = tmp_path / "structured.json"
+    selected: list[str] = []
+    factory = _Factory(_FakeBackend())
+
+    def fake_provider_factory(value: str):
+        selected.append(value)
+        return factory
+
+    monkeypatch.setattr(cli_module, "_provider_backend_factory", fake_provider_factory)
+
+    argv = [
+        "--input-raw-json",
+        str(raw_path),
+        "--schema-request",
+        str(schema_path),
+        "--model",
+        "model-test",
+        "--output-normalized-json",
+        str(normalized_path),
+        "--output-structured-json",
+        str(structured_path),
+    ]
+    if provider is not None:
+        argv[0:0] = ["--provider", provider]
+
+    exit_code = cli_module.main(argv)
+
+    assert exit_code == 0
+    assert selected == [provider or "openai"]
+    assert factory.models == ["model-test"]
+
+
+def test_injected_backend_factory_stays_provider_and_credential_independent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    factory = _Factory(_FakeBackend())
+
+    exit_code, _, structured_path = _run_cli(
+        tmp_path,
+        factory,
+        provider="groq",
+    )
+
+    assert exit_code == 0
+    assert factory.models == ["gpt-test-explicit"]
+    assert structured_path.exists()
