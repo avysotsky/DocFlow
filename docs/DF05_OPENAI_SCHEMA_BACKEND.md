@@ -2,7 +2,7 @@
 
 ## State
 
-READY
+INTEGRATED
 
 ## Repository / branch
 
@@ -467,8 +467,20 @@ All five changed files were scanned before handoff. The scan passed: only generi
 
 None.
 
-### Next integration action
+### Integration result
 
-Development Orchestrator should review draft PR #5 and, if accepted, integrate DF-05 into `main`.
+DF-05 was accepted and integrated.
 
-Do not merge from this worker chat and do not start a subsequent slice here.
+```text
+final PR head: 7cf5e0b235c88c3615059af06f1629e0dba0a82d
+exact-head CI: 37614234502 — SUCCESS
+PR: #5
+merge commit: 2cc1a2c17e27200e708314d6196891837eb6ad8f
+post-merge CI: 37615744590 — SUCCESS
+```
+
+Architecture, API-shape, privacy, and secret review passed. The backend remains domain-neutral, preserves the integrated DF-04 contract, uses the OpenAI Responses API Structured Outputs path, and keeps deterministic schema validation in DF-04.
+
+The optional real-provider smoke was not required for integration and was not run.
+
+Next orchestration step: integrate the independent VS-08 runnable transcript-to-research slice, then define a provider-backed end-to-end transcript research demo that composes the two integrated boundaries without introducing a cross-repository package dependency.
