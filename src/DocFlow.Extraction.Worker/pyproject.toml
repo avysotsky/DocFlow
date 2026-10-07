@@ -8,6 +8,7 @@ dependencies = [
   "pdfplumber",
   "pydantic>=2",
   "jsonschema>=4",
+  "openai>=3.26.0,<4",
 ]
 
 [project.optional-dependencies]
