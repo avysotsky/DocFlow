@@ -6,7 +6,10 @@ import json
 import sys
 from collections.abc import Sequence
 
-from docflow_worker.engines import OpenAiSchemaDrivenTextExtractionBackend
+from docflow_worker.engines import (
+    GroqSchemaDrivenTextExtractionBackend,
+    OpenAiSchemaDrivenTextExtractionBackend,
+)
 from docflow_worker.text_artifact_pipeline import (
     BackendFactory,
     TextArtifactPipelineResult,
@@ -20,6 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Normalize a raw text document and produce a schema-driven structured artifact."
         )
     )
+    parser.add_argument(
+        "--provider",
+        choices=("openai", "groq"),
+        default="openai",
+    )
     parser.add_argument("--input-raw-json", required=True)
     parser.add_argument("--schema-request", required=True)
     parser.add_argument("--model", required=True)
@@ -31,6 +39,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _openai_backend_factory(model: str):
     return OpenAiSchemaDrivenTextExtractionBackend(model)
+
+
+def _groq_backend_factory(model: str):
+    return GroqSchemaDrivenTextExtractionBackend(model)
+
+
+def _provider_backend_factory(provider: str) -> BackendFactory:
+    if provider == "openai":
+        return _openai_backend_factory
+    if provider == "groq":
+        return _groq_backend_factory
+    raise ValueError("unsupported provider.")
 
 
 def _bounded_summary(result: TextArtifactPipelineResult) -> dict[str, object]:
@@ -52,7 +72,7 @@ def main(
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    factory = backend_factory or _openai_backend_factory
+    factory = backend_factory or _provider_backend_factory(args.provider)
 
     try:
         result = asyncio.run(
