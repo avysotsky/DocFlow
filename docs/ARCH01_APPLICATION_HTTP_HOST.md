@@ -1,7 +1,7 @@
 # ARCH-01 — DocFlow Application Boundary → HTTP Host
 
 ## State
-READY
+VALIDATION — DRAFT PR #8; exact-head CI pending
 
 ## Ownership
 - Repository: `avysotsky/DocFlow`
@@ -63,3 +63,21 @@ HTTP request → thin DocFlow.Api endpoint → DocFlow reusable application flow
 
 ## Completion handoff
 Update this file with final HEAD, changed files, architecture/contract decisions, tests, exact CI run, limitations, privacy/security check, blockers and next integration action. Open a **draft PR** to DocFlow main. Do not merge from the worker chat.
+
+## Implementation checkpoint — 2026-10-08
+
+- Initial baseline: `be957f139cae0eafff3cd47241a5d7dd6beca855`.
+- HTTP/application implementation HEAD before this status update: `2f1df13fa1c46975a2d7d6f10b1e097051eb8d4d`.
+- Draft PR: https://github.com/avysotsky/DocFlow/pull/8
+- Implemented in-memory `normalize_text_document`, `extract_normalized_text`, `extract_text_document` entrypoints in the existing provider-neutral pipeline.
+- The existing CLI reuses those routines while retaining artifact output order/semantics.
+- Added `docflow_worker.http_api:create_app` with versioned `POST /api/v1/extractions`, `GET /health/live`, `GET /health/ready`.
+- Run locally after installing the worker package: `uvicorn docflow_worker.http_api:app --host 127.0.0.1 --port 8081` from `src/DocFlow.Extraction.Worker`.
+- HTTP accepts `schemaVersion=1`, `rawDocument`, `schemaRequest`, `provider=openai|groq`, explicit `model`, and optional `documentName`. Provider credentials are server environment only. Request maximum: 1 MiB.
+- Response includes canonical `normalizedDocument` and `structuredResult` under `schemaVersion=1`; extraction validation status remains canonical and is not silently changed.
+- Tests added for deterministic in-memory ↔ HTTP parity, malformed input, provider-failure redaction, health metadata, and body limits.
+- Public/DocFlow extraction domain models and provider backends unchanged. No TradeOps dependencies.
+- Real provider smoke: NOT RUN; optional operator-only. Post-merge CI: NOT RUN.
+- Exact PR-head CI: PENDING; do not mark this workstream integrated without successful CI.
+- Privacy: synthetic fixtures only; no credentials committed or accepted in HTTP contract.
+- Integration: orchestrator review after exact-head checks, no worker merge.
