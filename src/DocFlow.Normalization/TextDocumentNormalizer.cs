@@ -235,13 +235,18 @@ public static class TextDocumentNormalizer
             DateTimeStyles.None).ToUniversalTime();
     }
 
-    private static string? RenderDate(DateTimeOffset? date) =>
-        date?.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFF'Z'", CultureInfo.InvariantCulture);
+    private static string? RenderDate(DateTimeOffset? date)
+    {
+        if (date is null) return null;
+        var timestamp = date.Value.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
+        var microseconds = (date.Value.Ticks % TimeSpan.TicksPerSecond) / 10;
+        return timestamp + (microseconds == 0 ? "" : "." + microseconds.ToString("D6", CultureInfo.InvariantCulture).TrimEnd('0')) + "Z";
+    }
 
     private static string Hash(JsonNode value)
     {
         var canonical = Canonical(value);
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
     private static string Canonical(JsonNode? node)
