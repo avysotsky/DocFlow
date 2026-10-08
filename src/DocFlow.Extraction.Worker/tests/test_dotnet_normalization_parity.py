@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parents[3]
 CLI_DLL = ROOT / "tools/DocFlow.Normalization.Cli/bin/Release/net8.0/DocFlow.Normalization.Cli.dll"
 SAMPLE = Path(__file__).parent / "fixtures/sample_transcript.json"
 
+# Python-only CI does not install dotnet or compile this optional native binary.
+# Dedicated .NET parity CI builds it first and must execute all cases.
+pytestmark = pytest.mark.skipif(not CLI_DLL.is_file(), reason="Native .NET CLI not built in this job")
+
 
 def native_normalize(payload: dict) -> dict:
     completed = subprocess.run(
