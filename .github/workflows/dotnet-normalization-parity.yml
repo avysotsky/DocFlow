@@ -1,0 +1,29 @@
+name: DocFlow .NET Normalization Parity
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/DocFlow.Normalization/**'
+      - 'tools/DocFlow.Normalization.Cli/**'
+      - 'src/DocFlow.Extraction.Worker/tests/test_dotnet_normalization_parity.py'
+      - '.github/workflows/dotnet-normalization-parity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install existing DocFlow Python worker
+        run: python -m pip install -e 'src/DocFlow.Extraction.Worker[dev]'
+      - name: Build native .NET normalization CLI
+        run: dotnet build tools/DocFlow.Normalization.Cli/DocFlow.Normalization.Cli.csproj -c Release -warnaserror
+      - name: Python vs C# deterministic parity
+        run: python -m pytest src/DocFlow.Extraction.Worker/tests/test_dotnet_normalization_parity.py -q
