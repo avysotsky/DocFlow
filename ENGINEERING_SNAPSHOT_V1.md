@@ -1,7 +1,7 @@
 # DocFlow v1 — Public Engineering Snapshot
 
 ## Status
-**PUBLIC / APPLICATION DEVELOPMENT FROZEN — pending GitHub Archive setting.**
+**PUBLIC / APPLICATION DEVELOPMENT FROZEN.** Archive/read-only status is controlled by GitHub repository settings, not this static report.
 
 This repository is a stable public portfolio snapshot of the DocFlow document extraction prototype and its .NET migration proof. It will remain available at `https://github.com/avysotsky/DocFlow` with unchanged GitHub paths and historical PR/commit links. Proprietary further development is private.
 
@@ -32,4 +32,4 @@ This repository is intentionally not renamed, deleted, or made private. GitHub A
 - [Historical PRs](https://github.com/avysotsky/DocFlow/pulls)
 - [CI evidence](https://github.com/avysotsky/DocFlow/actions/runs/37809980079)
 
-GitHub archived state is a separate owner-controlled action after acceptance of private migration; this document alone does not archive the repository.
+The owner controls archived/read-only status in GitHub repository settings; this static document does not control repository visibility or lifecycle.
