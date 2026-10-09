@@ -1,4 +1,4 @@
-# DocFlow
+> **Public DocFlow v1 — engineering portfolio snapshot (October 2026).** This repository's application code is frozen at [commit `602346f`](https://github.com/avysotsky/DocFlow/tree/602346f90aed9ca9f940ac38ad1847249e3c81df). Further development is private. This repository will remain **public at its original GitHub URL** and become read-only once GitHub Archive is enabled. See [Snapshot evidence](ENGINEERING_SNAPSHOT_V1.md).\n\n# DocFlow
 
 DocFlow is a private commercial project for automated processing of business documents such as supplier quotations and invoices.
 
@@ -29,4 +29,4 @@ tests/
   DocFlow.IntegrationTests/
 ```
 
-Production code remains private. A separate public portfolio repository may be created later.
+This public v1 is a historical engineering portfolio snapshot. Active production development is private; no separate showcase repository is required.
